@@ -114,7 +114,7 @@
 /** GLOBAL VARIABLES **/
 //--------------------//
 
-/** Overall **/ //asdf
+/** Overall **/ //
 #define LOG_INTERVAL				5*1000		// ms between sleep/wake
 #define NUM_SAMPLES_PER_ON_CYCLE	3	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
