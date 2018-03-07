@@ -162,6 +162,7 @@ static int32_t     t_fine;
 #define RTC_BUFF_SIZE	7
 const int rtc_addr = 0x68; // 8bit I2C address, 0x68 for RTC
 int timeNow = 0;
+static int time_was_set = 0;
 
 /** DHT Variables **/
 static int dht_temp_C = 0;
@@ -1353,9 +1354,11 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("Testing RTC with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------");
 
-		if (SETTING_TIME_MANUALLY) {
+		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
-			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm
+//			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm
+			set_rtc(00, 29, 14, 4, 7, 3, 18);	// about 11 seconds of delay
+			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
 		err_code = 1;
