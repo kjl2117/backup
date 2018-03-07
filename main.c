@@ -48,6 +48,9 @@
  */
 
 
+//#define DEBUG	1
+
+
 
 #include "nrf.h"
 #include "bsp.h"
@@ -126,6 +129,10 @@ static uint32_t loop_num = 0;
  static uint32_t err_cnt_total = 0;
  static uint32_t dht_error_cnt_total = 0;
  static uint32_t hpm_error_cnt_total = 0;
+ static uint32_t figCO2_error_cnt_total = 0;
+ static uint32_t bme_error_cnt_total = 0;
+ static uint32_t rtc_error_cnt_total = 0;
+ static uint32_t plantower_error_cnt_total = 0;
 static ret_code_t err_code;
 //#define USING_SMALL_PLANTOWER		1	// The Small Plantower uses TWI
 
@@ -147,12 +154,15 @@ static int header_is_written = 0;
 //static nrf_saadc_value_t m_buffer[SAMPLES_IN_BUFFER];
 static nrf_saadc_value_t adc_value;
 
-/** Figaro CO2, TWI aka I2C.  from example: peripheral/twi_sensor **/
+/** General TWI aka I2C **/
+#define TWI_RETRY_NUM	3
+#define TWI_RETRY_WAIT	500	//ms
 #define TWI_INSTANCE_ID     1
 static const nrf_drv_twi_t m_twi = NRF_DRV_TWI_INSTANCE(TWI_INSTANCE_ID);
 /* Indicates if operation on TWI has ended. */
 static volatile bool m_xfer_done = false;
-/* Buffer for samples read from temperature sensor. */
+
+/** Figaro CO2, TWI aka I2C.  from example: peripheral/twi_sensor **/
 static int figCO2_value;
 const int figCO2_addr = 0x69; // 8bit I2C address, 0x69 for figaro CO2.  0x68 also available
 #define FIG_CO2_XFER_WAIT_TIME	2
@@ -337,6 +347,8 @@ APP_TIMER_DEF(hpm_startup_timer);
 typedef enum {
 	DHT,		// DIG
 	GPIO,		// DIG
+	ADP,		// DIG
+	TEMP_NRF,	// REG
 	FIGARO_CO2,	// I2C
 	RTC,		// I2C
 	BME,		// I2C
@@ -363,7 +375,7 @@ static int components_used_size;
 /**
  * Function for checking if array contains a value (used for selecting sensor code)
  */
-bool using_sensor(component_type val, component_type *arr) {
+bool using_component(component_type val, component_type *arr) {
 	int i;
     for (i=0; i < components_used_size; i++) {
         if (arr[i] == val)
@@ -991,7 +1003,7 @@ void twi_init (void)
 {
 //    ret_code_t err_code;
 
-    const nrf_drv_twi_config_t twi_figCO2_config = {
+    const nrf_drv_twi_config_t twi_config = {
        .scl                = TWI_SCL_PIN,
        .sda                = TWI_SDA_PIN,
        .frequency          = NRF_TWI_FREQ_100K,
@@ -1002,11 +1014,11 @@ void twi_init (void)
     // Maybe don't want handler??
     // From H file:
     // @param[in] event_handler   Event handler provided by the user. If NULL, blocking mode is enabled.
-//    err_code = nrf_drv_twi_init(&m_twi, &twi_figCO2_config, twi_handler, NULL);
-    err_code = nrf_drv_twi_init(&m_twi, &twi_figCO2_config, NULL, NULL);
+//    err_code = nrf_drv_twi_init(&m_twi, &twi_config, twi_handler, NULL);
+    err_code = nrf_drv_twi_init(&m_twi, &twi_config, NULL, NULL);
     APP_ERROR_CHECK(err_code);
 
-    nrf_drv_twi_enable(&m_twi);
+//    nrf_drv_twi_enable(&m_twi);
 }
 
 // 2's Complement
@@ -1028,13 +1040,19 @@ static ret_code_t read_figCO2()
     uint8_t readme_lsb;
 //    ret_code_t err_code;
 
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
     uint8_t reg = 0x03;
 	err_code = nrf_drv_twi_tx(&m_twi, figCO2_addr, &reg, 1, true);
-	NRF_LOG_INFO("err_code: %d", err_code);
-    APP_ERROR_CHECK(err_code);
+//	NRF_LOG_INFO("err_code: %d", err_code);
+//    APP_ERROR_CHECK(err_code);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+
 
     err_code = nrf_drv_twi_rx(&m_twi, figCO2_addr, &readme_lsb, 1);
-	NRF_LOG_INFO("err_code: %d", err_code);
+//	NRF_LOG_INFO("err_code: %d", err_code);
     APP_ERROR_CHECK(err_code);
 //    nrf_delay_ms(FIG_CO2_XFER_WAIT_TIME);
 
@@ -1050,6 +1068,9 @@ static ret_code_t read_figCO2()
     APP_ERROR_CHECK(err_code);
 //    nrf_delay_ms(FIG_CO2_XFER_WAIT_TIME);
 
+    nrf_drv_twi_disable(&m_twi);	// for saving power
+
+
 //	NRF_LOG_INFO("readme_msb: 0x%x", readme_msb);
 //	NRF_LOG_INFO("readme_lsb: 0x%x", readme_lsb);
 
@@ -1061,15 +1082,21 @@ static ret_code_t read_figCO2()
 
 
 // Compensate the raw BME280 values using calibration values
-static void bme_read_calib_data() {
+static ret_code_t bme_read_calib_data() {
 
 	uint8_t cmd[18];
 	uint8_t reg0;
 
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
 	// Get all the temp calib data
     reg0 = 0x88;
     err_code = nrf_drv_twi_tx(&m_twi, bme_addr, &reg0, 1, true);
-    APP_ERROR_CHECK(err_code);
+//    APP_ERROR_CHECK(err_code);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+
     // Read the value from that register
 	err_code = nrf_drv_twi_rx(&m_twi, bme_addr, cmd, 6);
 	APP_ERROR_CHECK(err_code);
@@ -1109,6 +1136,9 @@ static void bme_read_calib_data() {
     // Read the value from that register
 	err_code = nrf_drv_twi_rx(&m_twi, bme_addr, &cmd[1], 7);
 	APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);	// for saving power
+
 	// Convert the values
     dig_H1 = cmd[0];
     dig_H2 = (cmd[2] << 8) | cmd[1];
@@ -1116,6 +1146,8 @@ static void bme_read_calib_data() {
     dig_H4 = (cmd[4] << 4) | (cmd[5] & 0x0f);
     dig_H5 = (cmd[6] << 4) | ((cmd[5]>>4) & 0x0f);
     dig_H6 = cmd[7];
+
+    return err_code;
 
 }
 
@@ -1125,7 +1157,10 @@ static ret_code_t bme_init() {
 
 	// Read and store calibration data once for all future reads
 	if (!has_read_calib_data) {
-		bme_read_calib_data();
+		err_code = bme_read_calib_data();
+	    if (err_code) {	// handle error outside
+	    	return err_code;
+	    }
 		has_read_calib_data = 1;
 	}
 
@@ -1134,16 +1169,24 @@ static ret_code_t bme_init() {
 //    ret_code_t err_code;
 //    uint8_t reg_test = 0x00;
 
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
 	// Starting the measurements by editing control registers
     cmd[0] = 0xf2; // ctrl_hum
     cmd[1] = 0x01; // Humidity oversampling x1
     err_code = nrf_drv_twi_tx(&m_twi, bme_addr, cmd, 2, true);
-    APP_ERROR_CHECK(err_code);
+//    APP_ERROR_CHECK(err_code);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+
 
     cmd[0] = 0xf4; // ctrl_meas
     cmd[1] = 0x25; // Temparature oversampling x1, Pressure oversampling x1, Force mode (reads, then goes to standby)
     err_code = nrf_drv_twi_tx(&m_twi, bme_addr, cmd, 2, true);
     APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);	// for saving power
 
 //	uint8_t readreg;
 ////	uint8_t readreg_changed;
@@ -1197,13 +1240,21 @@ static ret_code_t read_BME()
 
 	uint8_t bmebuff[BME_BUFF_SIZE];
 
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
 	// Tell it which register we want to start reading from
     uint8_t reg0 = 0xF7;
     err_code = nrf_drv_twi_tx(&m_twi, bme_addr, &reg0, 1, true);
-    APP_ERROR_CHECK(err_code);
+//    APP_ERROR_CHECK(err_code);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
     // Read the value from that register
 	err_code = nrf_drv_twi_rx(&m_twi, bme_addr, bmebuff, BME_BUFF_SIZE);
 	APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);	// for saving power
+
 
 
 //	// Read the bme registers and store them
@@ -1348,14 +1399,19 @@ static ret_code_t read_rtc()
 //    nrf_delay_ms(5);
 //	NRF_LOG_INFO("");
 
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
     // Checking the first register, make sure it's running (CH bit == 0)
     uint8_t regt = 0x00;
 //	NRF_LOG_INFO("read_rtc(): BEFORE TX");
 //	nrf_delay_ms(500);
     err_code = nrf_drv_twi_tx(&m_twi, rtc_addr, &regt, 1, true);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
 //	NRF_LOG_INFO("err_code: %d", err_code);
 //	nrf_delay_ms(1000);
-    APP_ERROR_CHECK(err_code);
+//    APP_ERROR_CHECK(err_code);
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
 //	NRF_LOG_INFO("err_code: %d", err_code);
     APP_ERROR_CHECK(err_code);
@@ -1432,6 +1488,9 @@ static ret_code_t read_rtc()
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, rtcbuff, RTC_BUFF_SIZE);
 	APP_ERROR_CHECK(err_code);
 
+    nrf_drv_twi_disable(&m_twi);	// for saving power
+
+
 	// Convert bcd to dec, and print out the values
 	for (int i = 0; i < RTC_BUFF_SIZE; i++) {
 	    rtcbuff[i] = rtcbuff[i] - 6 * (rtcbuff[i] >> 4);
@@ -1473,18 +1532,28 @@ static ret_code_t read_plantower_twi()
 //    ret_code_t err_code;
 //    uint8_t reg_test = 0x00;
 
+    nrf_drv_twi_enable(&m_twi);		// for saving power
 
 	// Tell it which register we want to start reading from
     uint8_t reg0 = 0x00;
 //    NRF_LOG_INFO("BEFORE TX");
     err_code = nrf_drv_twi_tx(&m_twi, plantower_twi_addr, &reg0, 1, true);
-    NRF_LOG_INFO("AFTER TX, err_code: %d", err_code);
-    APP_ERROR_CHECK(err_code);
+//    NRF_LOG_INFO("AFTER TX, err_code: %d", err_code);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
     // Read the value from that register
 //    NRF_LOG_INFO("BEFORE RX");
 	err_code = nrf_drv_twi_rx(&m_twi, plantower_twi_addr, plantower_buff, PLANTOWER_TWI_BUFF_SIZE);
-    NRF_LOG_INFO("AFTER RX, err_code: %d", err_code);
-	APP_ERROR_CHECK(err_code);
+//    NRF_LOG_INFO("AFTER RX, err_code: %d", err_code);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+//	APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);	// for saving power
+
 
 //	// For TESTING
 //	for (int i = 0; i < PLANTOWER_TWI_BUFF_SIZE; i++) {
@@ -1527,6 +1596,51 @@ static ret_code_t read_plantower_twi()
 }
 
 
+
+
+/**
+ * For getting the Temp internally through the nRF
+ */
+int32_t get_temp_nrf(void) {
+
+    // This function contains workaround for PAN_028 rev2.0A anomalies 28, 29,30 and 31.
+    int32_t volatile temp;
+
+    nrf_temp_init();
+
+//    APP_ERROR_CHECK(NRF_LOG_INIT(NULL));
+//    NRF_LOG_DEFAULT_BACKENDS_INIT();
+
+//    while (true)
+//    {
+
+	NRF_TEMP->TASKS_START = 1; /** Start the temperature measurement. */
+
+	/* Busy wait while temperature measurement is not finished, you can skip waiting if you enable interrupt for DATARDY event and read the result in the interrupt. */
+	/*lint -e{845} // A zero has been given as right argument to operator '|'" */
+	while (NRF_TEMP->EVENTS_DATARDY == 0)
+	{
+		// Do nothing.
+	}
+	NRF_TEMP->EVENTS_DATARDY = 0;
+
+	/**@note Workaround for PAN_028 rev2.0A anomaly 29 - TEMP: Stop task clears the TEMP register. */
+	temp = (nrf_temp_read() / 4);
+
+	/**@note Workaround for PAN_028 rev2.0A anomaly 30 - TEMP: Temp module analog front end does not power down when DATARDY event occurs. */
+	NRF_TEMP->TASKS_STOP = 1; /** Stop the temperature measurement. */
+
+	return temp;
+//	NRF_LOG_INFO("Actual temperature: %d", (int)temp);
+//	nrf_delay_ms(500);
+
+//	NRF_LOG_FLUSH();
+
+//    }
+
+
+
+}
 
 
 // Initialize SD
@@ -1721,7 +1835,7 @@ void get_data(component_type components_used[]) {
 //		avoided_error_cnt = 0;
 //		ret_code_t err_code;
 		// Sharp PM, Turn LED OFF (high)
-	if (using_sensor(SHARP, components_used)) {
+	if (using_component(SHARP, components_used)) {
 	    nrf_gpio_cfg_output(SHARP_PM_LED);
 		nrf_gpio_pin_set(SHARP_PM_LED);
 	}
@@ -1730,7 +1844,7 @@ void get_data(component_type components_used[]) {
 
 
 	// DHT sensor
-	if (using_sensor(DHT, components_used)) {
+	if (using_component(DHT, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing DHT...");
 		NRF_LOG_INFO("--------------");
@@ -1774,7 +1888,7 @@ void get_data(component_type components_used[]) {
 
 
 	// Testing GPIO
-	if (using_sensor(GPIO, components_used)) {
+	if (using_component(GPIO, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing GPIO...");
 		NRF_LOG_INFO("---------------");
@@ -1792,64 +1906,137 @@ void get_data(component_type components_used[]) {
 	}
 
 
+	// NRF Internal temp reading
+	if (using_component(TEMP_NRF, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Internal Temp Reading");
+		NRF_LOG_INFO("---------------------");
+		int32_t temp_nrf = 0;
+		temp_nrf = get_temp_nrf();
+		NRF_LOG_INFO("temp_nrf = %d", temp_nrf);
+	}
 
 
 
-	//Figaro CO2, TWI (I2C)
-	if (using_sensor(FIGARO_CO2, components_used)) {
+
+
+	// Figaro CO2, TWI (I2C)
+	if (using_component(FIGARO_CO2, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing Figaro CO2 with I2C/TWI...");
 		NRF_LOG_INFO("----------------------------------");
 		NRF_LOG_FLUSH();
 	//    twi_init();
-		err_code = read_figCO2();
+//	    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+		err_code = 1;
+		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
+//			NRF_LOG_INFO("Start DHT read..");
+			err_code = read_figCO2();
+		//	NRF_LOG_INFO("dht_error: %d", dht_error);
+			if (err_code) {
+				NRF_LOG_INFO("* RETRY: FIGARO ERROR, err_code=%d *", err_code);
+				avoided_error_cnt++;
+				nrf_delay_ms(TWI_RETRY_WAIT);
+			}
+		}
+
+
+//		err_code = read_figCO2();
+//	    nrf_drv_twi_disable(&m_twi);	// for saving power
+
 
 	//	NRF_LOG_INFO("figCO2_value: 0x%x", figCO2_value);
-		NRF_LOG_INFO("figCO2_value: %d", figCO2_value);
 		if (err_code) {
 			NRF_LOG_INFO("** ERROR: Figaro CO2 read, err_code=%d **", err_code);
+			figCO2_value = 0;
 			err_cnt++;
+			figCO2_error_cnt_total++;
 		}
+		NRF_LOG_INFO("figCO2_value: %d", figCO2_value);
 	}
 
 
-	//BME280 TRH, TWI (I2C)
-	if (using_sensor(BME, components_used)) {
+
+
+	// BME280 TRH, TWI (I2C)
+	if (using_component(BME, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing BME280 TRH with I2C/TWI...");
 		NRF_LOG_INFO("----------------------------------");
 //		NRF_LOG_FLUSH();
 	//    twi_init();
 
-		err_code = bme_init();
-		// Wait for the measurements to end
-		nrf_delay_ms(BME_MEAS_WAIT);
-		err_code = read_BME();
 
+		err_code = 1;
+		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
+//			NRF_LOG_INFO("Start DHT read..");
+			err_code = bme_init();
+			nrf_delay_ms(BME_MEAS_WAIT);	// Wait for the measurements to end. TODO: maybe disable TWI before and after wait
+			err_code = read_BME();
+		//	NRF_LOG_INFO("dht_error: %d", dht_error);
+			if (err_code) {
+				NRF_LOG_INFO("* RETRY: BME ERROR, err_code=%d *", err_code);
+				avoided_error_cnt++;
+				nrf_delay_ms(TWI_RETRY_WAIT);
+			}
+		}
+
+////	    nrf_drv_twi_enable(&m_twi);		// for saving power
+//		err_code = bme_init();
+//		nrf_delay_ms(BME_MEAS_WAIT);	// Wait for the measurements to end. TODO: maybe disable TWI before and after wait
+//		err_code = read_BME();
+////	    nrf_drv_twi_disable(&m_twi);	// for saving power
+
+
+		if (err_code) {
+			NRF_LOG_INFO("** ERROR: BME280 TRH read, err_code=%d **", err_code);
+			bme_temp_C = 0;
+			bme_humidity = 0;
+			bme_pressure = 0;
+			err_cnt++;
+			bme_error_cnt_total++;
+		}
 		NRF_LOG_INFO("bme_temp_C: %d", bme_temp_C);
 		NRF_LOG_INFO("bme_humidity: %d", bme_humidity);
 		NRF_LOG_INFO("bme_pressure: %d", bme_pressure);
-		if (err_code) {
-			NRF_LOG_INFO("** ERROR: BME280 TRH read, err_code=%d **", err_code);
-			err_cnt++;
-		}
+
 	}
 
 
 	// RTC, TWI (I2C)
-	if (using_sensor(RTC, components_used)) {
+	if (using_component(RTC, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing RTC with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------");
 	//    twi_init();	// already initialized with Figaro CO2
-		err_code = read_rtc();
+		err_code = 1;
+		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
+//			NRF_LOG_INFO("Start DHT read..");
+			err_code = read_rtc();
+		//	NRF_LOG_INFO("dht_error: %d", dht_error);
+			if (err_code) {
+				NRF_LOG_INFO("* RETRY: RTC ERROR, err_code=%d *", err_code);
+				avoided_error_cnt++;
+				nrf_delay_ms(TWI_RETRY_WAIT);
+			}
+		}
+
+//		err_code = read_rtc();
+		NRF_LOG_INFO("timeNow: %d", timeNow);
+		if (err_code) {
+			NRF_LOG_INFO("** ERROR: RTC read, err_code=%d **", err_code);
+			timeNow = 0;
+			err_cnt++;
+			rtc_error_cnt_total++;
+		}
 		NRF_LOG_INFO("timeNow: %d", timeNow);
 	}
 
 
 
 	// Trying to read sample from ADC
-	if (using_sensor(ADC, components_used)) {
+	if (using_component(ADC, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing ADC...");
 		NRF_LOG_INFO("--------------");
@@ -1868,7 +2055,7 @@ void get_data(component_type components_used[]) {
 
 
 	// Sharp PM, Analog read.  TODO: implement sample LED
-	if (using_sensor(SHARP, components_used)) {
+	if (using_component(SHARP, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing Sharp PM...");
 		NRF_LOG_INFO("-------------------");
@@ -1903,7 +2090,7 @@ void get_data(component_type components_used[]) {
 
 
 	// Spec CO, Analog read.  TODO: implement averaging over 128 samples
-	if (using_sensor(SPEC_CO, components_used)) {
+	if (using_component(SPEC_CO, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing Spec CO... (not connected)");
 		NRF_LOG_INFO("------------------");
@@ -1933,7 +2120,7 @@ void get_data(component_type components_used[]) {
 
 
 	// Figaro CO, Analog read.
-	if (using_sensor(FIGARO_CO, components_used)) {
+	if (using_component(FIGARO_CO, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing Figaro CO...");
 		NRF_LOG_INFO("--------------------");
@@ -1951,7 +2138,7 @@ void get_data(component_type components_used[]) {
 
 
 	// Check Battery Level
-	if (using_sensor(BATTERY, components_used)) {
+	if (using_component(BATTERY, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Checking Battery Level...");
 		NRF_LOG_INFO("-------------------------");
@@ -1975,7 +2162,7 @@ void get_data(component_type components_used[]) {
 
 
 	// Small Plantower, TWI (I2C)
-	if (using_sensor(SMALL_PLANTOWER, components_used)) {
+	if (using_component(SMALL_PLANTOWER, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing Small Plantower with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------------------");
@@ -1983,10 +2170,31 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("Waiting for startup wait..");
 		while (!plantower_startup_wait_done) {}
 
-		err_code = read_plantower_twi();
+		err_code = 1;
+		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
+//			NRF_LOG_INFO("Start DHT read..");
+			err_code = read_plantower_twi();
+		//	NRF_LOG_INFO("dht_error: %d", dht_error);
+			if (err_code) {
+				NRF_LOG_INFO("* RETRY: PLANTOWER ERROR, err_code=%d *", err_code);
+				avoided_error_cnt++;
+				nrf_delay_ms(TWI_RETRY_WAIT);
+			}
+		}
+
+//		err_code = read_plantower_twi();
+
+		if (err_code) {
+			NRF_LOG_INFO("** ERROR: PLANTOWER read, err_code=%d **", err_code);
+			plantower_2_5_value = 0;
+			plantower_10_value = 0;
+			err_cnt++;
+			plantower_error_cnt_total++;
+		}
 
 		NRF_LOG_INFO("plantower_2_5_value = %d", plantower_2_5_value);
 		NRF_LOG_INFO("plantower_10_value = %d", plantower_10_value);
+
 	}
 
 
@@ -1994,7 +2202,7 @@ void get_data(component_type components_used[]) {
 
 
 	/** Test HPM sensor (Serial comm) **/
-	if (using_sensor(HONEYWELL, components_used)) {
+	if (using_component(HONEYWELL, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing Honeywell/Plantower (Serial Comm)...");
 		NRF_LOG_INFO("--------------------------------------------");
@@ -2118,7 +2326,7 @@ void get_data(component_type components_used[]) {
 
 	/** UNinitialize some stuff **/
 	// Sharp PM, Turn LED ON (low)
-	if (using_sensor(SHARP, components_used)) {
+	if (using_component(SHARP, components_used)) {
 		nrf_gpio_cfg_output(SHARP_PM_LED);
 		nrf_gpio_pin_clear(SHARP_PM_LED);
 	}
@@ -2206,17 +2414,23 @@ int test_main(component_type components_used[])
 //    NRF_LOG_INFO("err_code: %d", err_code);
 //    APP_ERROR_CHECK(err_code);
 	dht_startup_wait_done = 0;
-    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(DHT_STARTUP_WAIT_TIME), NULL);
-//    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(DHT_STARTUP_WAIT_TIME), (void *) DHT);
-    APP_ERROR_CHECK(err_code);
+	if (using_component(DHT, components_used)) {
+		err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(DHT_STARTUP_WAIT_TIME), NULL);
+	//    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(DHT_STARTUP_WAIT_TIME), (void *) DHT);
+		APP_ERROR_CHECK(err_code);
+	}
     plantower_startup_wait_done = 0;
-    err_code = app_timer_start(plantower_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), NULL);
-//    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), (void *) PLANTOWER);
-    APP_ERROR_CHECK(err_code);
+	if (using_component(SMALL_PLANTOWER, components_used)) {
+		err_code = app_timer_start(plantower_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), NULL);
+	//    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), (void *) PLANTOWER);
+		APP_ERROR_CHECK(err_code);
+	}
     hpm_startup_wait_done = 0;
-    err_code = app_timer_start(hpm_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), NULL);
-//    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), (void *) HPM);
-    APP_ERROR_CHECK(err_code);
+	if (using_component(HONEYWELL, components_used)) {
+		err_code = app_timer_start(hpm_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), NULL);
+	//    err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), (void *) HPM);
+		APP_ERROR_CHECK(err_code);
+	}
 
 
 	// FOR TESTING: initial delay so things can settle
@@ -2252,16 +2466,18 @@ int test_main(component_type components_used[])
 //	nrf_delay_ms(3000);
 
     // ADP sleep, turn OFF all power
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
-	NRF_LOG_INFO("-------------------------------");
+	if (using_component(ADP, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
+		NRF_LOG_INFO("-------------------------------");
 
-    nrf_gpio_cfg_output(ADP_PIN);
-    nrf_gpio_cfg_output(STATUS_LED);
-	NRF_LOG_INFO("LOW.");
-	nrf_gpio_pin_clear(ADP_PIN);	// Enable HIGH, Turn OFF ADP
-//	nrf_gpio_pin_set(STATUS_LED);	// Enable LOW, Turn OFF LED
-	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+		nrf_gpio_cfg_output(ADP_PIN);
+		nrf_gpio_cfg_output(STATUS_LED);
+		NRF_LOG_INFO("LOW.");
+		nrf_gpio_pin_clear(ADP_PIN);	// Enable HIGH, Turn OFF ADP
+	//	nrf_gpio_pin_set(STATUS_LED);	// Enable LOW, Turn OFF LED
+		nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+	}
 
 //	nrf_delay_ms(3000);
 
@@ -2303,49 +2519,6 @@ int test_main(component_type components_used[])
 }
 
 
-/**
- * For getting the Temp internally through the nRF
- */
-int32_t get_temp_nrf(void) {
-
-    // This function contains workaround for PAN_028 rev2.0A anomalies 28, 29,30 and 31.
-    int32_t volatile temp;
-
-    nrf_temp_init();
-
-//    APP_ERROR_CHECK(NRF_LOG_INIT(NULL));
-//    NRF_LOG_DEFAULT_BACKENDS_INIT();
-
-//    while (true)
-//    {
-
-	NRF_TEMP->TASKS_START = 1; /** Start the temperature measurement. */
-
-	/* Busy wait while temperature measurement is not finished, you can skip waiting if you enable interrupt for DATARDY event and read the result in the interrupt. */
-	/*lint -e{845} // A zero has been given as right argument to operator '|'" */
-	while (NRF_TEMP->EVENTS_DATARDY == 0)
-	{
-		// Do nothing.
-	}
-	NRF_TEMP->EVENTS_DATARDY = 0;
-
-	/**@note Workaround for PAN_028 rev2.0A anomaly 29 - TEMP: Stop task clears the TEMP register. */
-	temp = (nrf_temp_read() / 4);
-
-	/**@note Workaround for PAN_028 rev2.0A anomaly 30 - TEMP: Temp module analog front end does not power down when DATARDY event occurs. */
-	NRF_TEMP->TASKS_STOP = 1; /** Stop the temperature measurement. */
-
-	return temp;
-//	NRF_LOG_INFO("Actual temperature: %d", (int)temp);
-//	nrf_delay_ms(500);
-
-//	NRF_LOG_FLUSH();
-
-//    }
-
-
-
-}
 
 
 /**
@@ -2481,6 +2654,23 @@ int test_SUM(int entering_deep_sleep) {
 	NRF_LOG_INFO("-----------------------");
 
 
+//	// TWI (I2C) init
+//	twi_init();
+//
+//
+//	// RTC, TWI (I2C)
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("Testing RTC with I2C/TWI...");
+//	NRF_LOG_INFO("---------------------------");
+////    twi_init();	// already initialized with Figaro CO2
+////	nrf_delay_ms(500);
+//	err_code = read_rtc();
+//	NRF_LOG_INFO("timeNow: %d", timeNow);
+//
+//	// TWI (I2C) UNinit
+////	twi_init();
+//    nrf_drv_twi_disable(&m_twi);
+//    nrf_drv_twi_uninit(&m_twi);
 
 
     // ADP, turn ON all power
@@ -2521,23 +2711,23 @@ int test_SUM(int entering_deep_sleep) {
 //	}
 
 
-	// TWI (I2C) init
-	twi_init();
-
-
-	// RTC, TWI (I2C)
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("Testing RTC with I2C/TWI...");
-	NRF_LOG_INFO("---------------------------");
-//    twi_init();	// already initialized with Figaro CO2
-//	nrf_delay_ms(500);
-	err_code = read_rtc();
-	NRF_LOG_INFO("timeNow: %d", timeNow);
-
-	// TWI (I2C) UNinit
+//	// TWI (I2C) init
 //	twi_init();
-    nrf_drv_twi_disable(&m_twi);
-    nrf_drv_twi_uninit(&m_twi);
+//
+//
+//	// RTC, TWI (I2C)
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("Testing RTC with I2C/TWI...");
+//	NRF_LOG_INFO("---------------------------");
+////    twi_init();	// already initialized with Figaro CO2
+////	nrf_delay_ms(500);
+//	err_code = read_rtc();
+//	NRF_LOG_INFO("timeNow: %d", timeNow);
+//
+//	// TWI (I2C) UNinit
+////	twi_init();
+//    nrf_drv_twi_disable(&m_twi);
+//    nrf_drv_twi_uninit(&m_twi);
 
 
 
@@ -2545,8 +2735,8 @@ int test_SUM(int entering_deep_sleep) {
 
 
 	// Save the data to SD card
-	nrf_delay_ms(1000);
-//	save_data();
+//	nrf_delay_ms(1000);
+	save_data();
 
 	// Disable SPI to save power, without these: 816uA (maybe 0.63mA) in deep sleep
 //	NRF_SPI0->ENABLE = 0;	// Still has same current in deep sleep, but NEED this, o/w deep sleep current goes to 0.78mA
@@ -2605,6 +2795,28 @@ int test_SUM(int entering_deep_sleep) {
 
 
 
+//	// TWI (I2C) init
+//	twi_init();
+//
+//
+//	// RTC, TWI (I2C)
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("Testing RTC with I2C/TWI...");
+//	NRF_LOG_INFO("---------------------------");
+////    twi_init();	// already initialized with Figaro CO2
+////	nrf_delay_ms(500);
+//	err_code = read_rtc();
+//	NRF_LOG_INFO("timeNow: %d", timeNow);
+//
+//	// TWI (I2C) UNinit
+////	twi_init();
+//    nrf_drv_twi_disable(&m_twi);
+//    nrf_drv_twi_uninit(&m_twi);
+
+
+
+
+
 	if (entering_deep_sleep) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("DEEP SLEEP: Turning OFF CPU...");
@@ -2636,22 +2848,22 @@ int test_SUM(int entering_deep_sleep) {
 int main(void) {
 
 	component_type components_used[] = {
-////			DHT,		// DIG
-////			GPIO,		// DIG
-////			ADC,		// AIN
-//			FIGARO_CO2,	// I2C,			579
-//			RTC,		// I2C
+			ADP,		// DIG
+			TEMP_NRF,	// REGISTER
+			FIGARO_CO2,	// I2C,			579
+			RTC,		// I2C
 			BME,		// I2C
-//			SMALL_PLANTOWER,	// I2C,	2
-//			SHARP,		// AIN + DIG,	70
-//			SPEC_CO,	// AIN,			102
-//			FIGARO_CO,	// AIN,			1643
-//			BATTERY,	// AIN(no pin),	3279
-////			HONEYWELL,			// SERIAL
+			SMALL_PLANTOWER,	// I2C,	2
+			SHARP,		// AIN + DIG,	70
+			SPEC_CO,	// AIN,			102
+			FIGARO_CO,	// AIN,			1643
+			BATTERY,	// AIN(no pin),	3279
 	};
 	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 
 	err_code = test_all(components_used);
+
+
 
 
 
