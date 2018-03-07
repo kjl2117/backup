@@ -48,7 +48,7 @@
  */
 
 
-//#define DEBUG	1
+//#define DEBUG	1 asdf
 
 
 
@@ -118,6 +118,7 @@
 //--------------------//
 
 /** Overall **/
+#define SETTING_TIME_MANUALLY		0
 #define LOG_INTERVAL				5*1000		// ms between sleep/wake
 #define NUM_SAMPLES_PER_ON_CYCLE	3	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
@@ -1371,6 +1372,49 @@ static ret_code_t read_BME()
 //}
 
 
+// Converts binary coded decimal to decimal (0x12 => 12)
+static inline uint8_t bcd_to_dec(uint8_t hex) {
+	uint8_t dec = ((hex & 0xF0) >> 4) * 10 + (hex & 0x0F);
+    return dec;
+}
+
+// Converts decimal to binary coded decimal (12 => 0x12)
+static inline uint8_t dec_to_bcd(uint8_t dec) {
+	uint8_t bcd = ((dec / 10) << 4) | (dec % 10);
+    return bcd;
+}
+
+
+// Set the time of the RTC with TWI (I2C)
+static ret_code_t set_rtc(uint8_t sec, uint8_t min, uint8_t hour, uint8_t wday, uint8_t date, uint8_t mon, uint8_t year) {
+
+	uint8_t rtcbuff[8];
+
+	// setup buffer to overwrite registers
+	rtcbuff[0] = 0x00;	// register address for Seconds
+	rtcbuff[1] = dec_to_bcd(sec);
+	rtcbuff[2] = dec_to_bcd(min);
+	rtcbuff[3] = dec_to_bcd(hour);
+	rtcbuff[4] = dec_to_bcd(wday);
+	rtcbuff[5] = dec_to_bcd(date);
+	rtcbuff[6] = dec_to_bcd(mon);
+	rtcbuff[7] = dec_to_bcd(year);
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+	// Starting the measurements by editing control registers
+    err_code = nrf_drv_twi_tx(&m_twi, rtc_addr, rtcbuff, 8, true);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+
+    nrf_drv_twi_disable(&m_twi);	// for saving power
+
+    return err_code;
+
+}
+
+
 // Read RTC crystal with TWI (I2C) TODO: pass TWI address as argument
 static ret_code_t read_rtc()
 {
@@ -1415,7 +1459,7 @@ static ret_code_t read_rtc()
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
 //	NRF_LOG_INFO("err_code: %d", err_code);
     APP_ERROR_CHECK(err_code);
-    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
+//    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
 //    NRF_LOG_INFO("converted: %d", readreg - 6 * (readreg >> 4));
     uint8_t is_running = !(readreg>>7);		// TODO: add a check and correction action here
     NRF_LOG_INFO("is_running: %d", is_running );
@@ -1427,7 +1471,7 @@ static ret_code_t read_rtc()
     APP_ERROR_CHECK(err_code);
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
     APP_ERROR_CHECK(err_code);
-    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
+//    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
 
 
     // Turn off the square wave, it's not needed and wastes power
@@ -1436,11 +1480,11 @@ static ret_code_t read_rtc()
     APP_ERROR_CHECK(err_code);
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
     APP_ERROR_CHECK(err_code);
-    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
+//    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
     // Turn OFF the specific bits
     readreg &= ~(1UL << 3);	// EN32KHZ
     readreg &= ~(1UL << 6);	// BB32KHZ
-    NRF_LOG_INFO("new readreg 0x%x: 0x%x", regt, readreg);
+//    NRF_LOG_INFO("new readreg 0x%x: 0x%x", regt, readreg);
     // Write to the register
 	uint8_t sqwv_off_cmd[2] = {regt,	readreg};
 	err_code = nrf_drv_twi_tx(&m_twi, rtc_addr, sqwv_off_cmd, sizeof(sqwv_off_cmd), false);
@@ -1452,7 +1496,7 @@ static ret_code_t read_rtc()
     APP_ERROR_CHECK(err_code);
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
     APP_ERROR_CHECK(err_code);
-    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
+//    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
 
     // Check that the change was made
     regt = 0x0f;
@@ -1460,7 +1504,7 @@ static ret_code_t read_rtc()
     APP_ERROR_CHECK(err_code);
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
     APP_ERROR_CHECK(err_code);
-    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
+//    NRF_LOG_INFO("readreg 0x%x: 0x%x", regt, readreg);
 
 
 
@@ -2009,6 +2053,13 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing RTC with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------");
+
+		if (SETTING_TIME_MANUALLY) {
+			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
+			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm
+			// NOTE: turn OFF SETTING_TIME_MANUALLY after
+
+		}
 	//    twi_init();	// already initialized with Figaro CO2
 		err_code = 1;
 		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
