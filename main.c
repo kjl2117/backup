@@ -93,9 +93,9 @@
 //--------------------//
 
 /** Overall **/
-#define SETTING_TIME_MANUALLY		0
+#define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define LOG_INTERVAL				5*1000		// ms between sleep/wake
-#define NUM_SAMPLES_PER_ON_CYCLE	3	// 20
+#define NUM_SAMPLES_PER_ON_CYCLE	1	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
 static uint32_t loop_num = 0;
@@ -109,6 +109,7 @@ static uint32_t loop_num = 0;
  static uint32_t bme_error_cnt_total = 0;
  static uint32_t rtc_error_cnt_total = 0;
  static uint32_t plantower_error_cnt_total = 0;
+ static uint32_t fuel_gauge_error_cnt_total = 0;
 static ret_code_t err_code;
 
 
@@ -116,7 +117,7 @@ static ret_code_t err_code;
 /** SD Card Variables.  From example: peripheral/fatfs **/
 #define FILE_NAME   "test.TXT"
 #define MAX_OUT_STR_SIZE	200
-#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, battery_value, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 static FATFS fs;
 static FIL file;
 FRESULT ff_result;
@@ -158,17 +159,21 @@ static uint16_t    dig_H1, dig_H3;
 static int16_t     dig_H2, dig_H4, dig_H5, dig_H6;
 static int32_t     t_fine;
 
-/** RTC, for measuring Time **/
+/** RTC, for measuring Time (and Temp) **/
 #define RTC_BUFF_SIZE	7
 const int rtc_addr = 0x68; // 8bit I2C address, 0x68 for RTC
-int timeNow = 0;
+static int timeNow = 0;
+static int rtc_temp = 0;	// units: degC*100, precision +/- 0.25C
 static int time_was_set = 0;
+
+/** NRF Internal temp **/
+static int32_t temp_nrf = 0;	// units: degC*100, precision +/- 0.25C
+
 
 /** DHT Variables **/
 static int dht_temp_C = 0;
 static int dht_humidity = 0;
 #define DHT_RETRY_NUM	5
-
 
 /** Timer variables **/
 #define TIMER_NUM	0	// Which Timer to use: TIMER0 reserved for SoftDevice, maybe change sdk_config.h
@@ -206,6 +211,13 @@ static nrf_saadc_value_t figCO_value;
 /** Battery Check Variables **/
 #define BATTERY_CHANNEL_NUM		4
 static nrf_saadc_value_t battery_value;
+
+/** Fuel Gauge Check Variables **/
+const int fuel_addr = 0x36; // 8bit I2C address, 0x68 for RTC
+static uint16_t fuel_v_cell = 0;	// units: mV
+static uint32_t fuel_percent = 0;	// units: percent*1000
+#define MAX17043_to_mV	1.25
+static bool has_quick_started_fuel_gauge = false;
 
 /** Small Plantower (TWI) **/
 #define PLANTOWER_TWI_BUFF_SIZE		32
@@ -302,14 +314,17 @@ typedef enum {
 	SPEC_CO,	// AIN
 	FIGARO_CO,	// AIN
 	BATTERY,	// AIN (no pin needed)
+	FUEL_GAUGE,	// I2C
 	SMALL_PLANTOWER,	// I2C
 	HONEYWELL,			// SERIAL
+	DEEP_SLEEP,
 } component_type;
 
 component_type twi_sensors[] = {
 		FIGARO_CO2,
 		RTC,
 		BME,
+		FUEL_GAUGE,
 		SMALL_PLANTOWER,
 };
 
@@ -925,6 +940,7 @@ static ret_code_t read_rtc()
 {
 	uint8_t readreg;
 	uint8_t rtcbuff[RTC_BUFF_SIZE];
+	uint8_t rtc_temp_buff[2];
 
     nrf_drv_twi_enable(&m_twi);		// for saving power
 
@@ -983,6 +999,14 @@ static ret_code_t read_rtc()
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, rtcbuff, RTC_BUFF_SIZE);
 	APP_ERROR_CHECK(err_code);
 
+
+	// Get the Temperature too
+    regt = 0x11;
+    err_code = nrf_drv_twi_tx(&m_twi, rtc_addr, &regt, 1, true);
+    APP_ERROR_CHECK(err_code);
+	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, rtc_temp_buff, 2);
+    APP_ERROR_CHECK(err_code);
+
     nrf_drv_twi_disable(&m_twi);	// for saving power
 
 	// Convert bcd to dec, and print out the values
@@ -990,7 +1014,7 @@ static ret_code_t read_rtc()
 	    rtcbuff[i] = rtcbuff[i] - 6 * (rtcbuff[i] >> 4);
     }
 
-    // Convert and store
+    // Convert time and store
     struct tm t;
     t.tm_year = (int)rtcbuff[6]+100;
     t.tm_mon = (int)rtcbuff[5]-1;           // Month, 0 - jan
@@ -1001,9 +1025,147 @@ static ret_code_t read_rtc()
     t.tm_isdst = 0;        // Is DST on? 1 = yes, 0 = no, -1 = unknown
     timeNow = mktime(&t);
 
+    // Convert the temp and store
+    int8_t temp3232a = rtc_temp_buff[0];	// signed int for integer portion of temp
+    uint8_t temp3232b = rtc_temp_buff[1];	// 2 MSB are the decimal portion (multiples of 1/4)
+    rtc_temp = temp3232a*100;
+    //for positive temp
+    if((temp3232b == 0x40) && (temp3232a >= 0)) rtc_temp += 25;
+    if (temp3232b == 0x80) rtc_temp += 50;
+    if((temp3232b == 0xc0) && (temp3232a >= 0)) rtc_temp += 75;
+    //for negative temp
+    if((temp3232b == 0x40) && (temp3232a < 0)) rtc_temp += 75;
+    if((temp3232b == 0xc0) && (temp3232a < 0)) rtc_temp += 25;
+
+
+
     return err_code;
 
 }
+
+
+// Quick Start Fuel Gauge MAX17043 with TWI (I2C)
+// This lets you pick when the "initial guess" of the internal SOC algorithm takes place
+// Make sure this happens when there aren't initial turn-on fluctuations.
+static ret_code_t fuel_gauge_quick_start() {
+
+	uint8_t regt = 0x06;	// MODE register
+	uint8_t cmd[] = {regt, 0x40, 0x00};	// write 0x4000 to quick start
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Get battery voltage
+	NRF_LOG_INFO("--Q1");
+    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_INFO("** WARNING in fuel_gauge_quick_start(), err_code: %d **", err_code);
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
+
+// Sleep Fuel Gauge MAX17043 with TWI (I2C), for saving power
+static ret_code_t fuel_gauge_sleep() {
+
+//	uint8_t regt = 0x0C;	// CONFIG register
+//	uint8_t cmd[] = { 	regt, 	// reg address to write to
+//						0x97, 	// default values
+//						0x80,	// sleep bit = 1, clears alert bit, alert threshold = 32%
+//	};
+//
+//    nrf_drv_twi_enable(&m_twi);		// for saving power
+//
+//    // Get battery voltage
+//    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
+//    if (err_code) {	// handle error outside
+//    	NRF_LOG_INFO("** WARNING in fuel_gauge_sleep(), err_code: %d **", err_code);
+//    	return err_code;
+//    }
+////    APP_ERROR_CHECK(err_code);
+//
+//    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
+// Wake Fuel Gauge MAX17043 with TWI (I2C), for saving power
+static ret_code_t fuel_gauge_wake() {
+
+//	uint8_t regt = 0x0C;	// CONFIG register
+//	uint8_t cmd[] = { 	regt, 	// reg address to write to
+//						0x97, 	// default values
+//						0x00,	// sleep bit = 0, clears alert bit, alert threshold = 32%
+//	};
+//
+//    nrf_drv_twi_enable(&m_twi);		// for saving power
+//
+//    // Get battery voltage
+//    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
+//    if (err_code) {	// handle error outside
+//    	NRF_LOG_INFO("** WARNING in fuel_gauge_wake(), err_code: %d **", err_code);
+//    	return err_code;
+//    }
+////    APP_ERROR_CHECK(err_code);
+//
+//    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
+// Read Fuel Gauge MAX17043 with TWI (I2C) TODO: add quickstart, sleeping, waking
+static ret_code_t read_fuel_gauge() {
+
+	uint8_t cmd[2];
+	uint8_t regt;
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Get battery voltage
+    regt = 0x02;
+    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, &regt, 1, true);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_INFO("** WARNING in read_fuel_gauge(), err_code: %d **", err_code);
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
+	err_code = nrf_drv_twi_rx(&m_twi, fuel_addr, cmd, 2);
+    APP_ERROR_CHECK(err_code);
+    // Convert and save
+    fuel_v_cell = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
+    fuel_v_cell = (fuel_v_cell >> 4) * MAX17043_to_mV;	// last 4 bits are nothing, convert to mV
+
+    // Get battery percentage SOC
+    regt = 0x04;
+    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, &regt, 1, true);
+    APP_ERROR_CHECK(err_code);
+	err_code = nrf_drv_twi_rx(&m_twi, fuel_addr, cmd, 2);
+    APP_ERROR_CHECK(err_code);
+    // Convert and save
+    fuel_percent = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
+	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
+	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
+//	NRF_LOG_INFO("fuel_percent = %d", fuel_percent);
+    fuel_percent = fuel_percent/256.0 * 1000;	// convert to float, but leave 3 decimal places
+////    fuel_percent = fuel_percent * (1000.0/256.0);	// convert to float, but leave 3 decimal places
+//	NRF_LOG_INFO("fuel_percent = %d", fuel_percent);
+//	NRF_LOG_INFO("cmd[0]*1000 + cmd[1]*(1000.0/256.0) = %d", cmd[0]*1000 + cmd[1]*(1000.0/256.0) );
+//	fuel_percent = cmd[0]*1000 + cmd[1]*(1000.0/256.0);	// Need *1000 for 3 decimal places, /256 to get fractional part
+
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
 
 
 // Read Small Plantower with TWI (I2C)
@@ -1183,7 +1345,7 @@ void save_data(void) {
     char out_str[MAX_OUT_STR_SIZE];
 	NRF_LOG_INFO("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
 	NRF_LOG_FLUSH();
-    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, (int) (battery_value*adc_to_V*1000), err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
     NRF_LOG_INFO("out_str: %s", out_str);
     // Make sure buffer was big enough and didn't spill over
     if (out_str_size > MAX_OUT_STR_SIZE) {
@@ -1215,6 +1377,9 @@ void save_data(void) {
 void get_data(component_type components_used[]) {
 
 	/** Initialize some stuff **/
+	// Turn on Sample LED
+    nrf_gpio_cfg_output(SAMPLE_LED);
+	nrf_gpio_pin_set(SAMPLE_LED);	// Enable HIGH, Turn ON LED
 	// Sharp PM, Turn LED OFF (high)
 	if (using_component(SHARP, components_used)) {
 	    nrf_gpio_cfg_output(SHARP_PM_LED);
@@ -1283,7 +1448,7 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Internal Temp Reading");
 		NRF_LOG_INFO("---------------------");
-		int32_t temp_nrf = 0;
+//		int32_t temp_nrf = 0;
 		temp_nrf = get_temp_nrf();
 		NRF_LOG_INFO("temp_nrf = %d", temp_nrf);
 	}
@@ -1357,7 +1522,7 @@ void get_data(component_type components_used[]) {
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm
-			set_rtc(00, 29, 14, 4, 7, 3, 18);	// about 11 seconds of delay
+			set_rtc(00, 07, 21, 2, 19, 3, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -1377,7 +1542,10 @@ void get_data(component_type components_used[]) {
 			err_cnt++;
 			rtc_error_cnt_total++;
 		}
+
+		// Print the reading
 		NRF_LOG_INFO("timeNow: %d", timeNow);
+		NRF_LOG_INFO("rtc_temp: %d", rtc_temp);
 	}
 
 
@@ -1477,7 +1645,7 @@ void get_data(component_type components_used[]) {
 	}
 
 
-	// Check Battery Level
+	// Check nRF Battery Level
 	if (using_component(BATTERY, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Checking Battery Level...");
@@ -1490,6 +1658,40 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("Sampling...");
 		nrf_drv_saadc_sample_convert(BATTERY_CHANNEL_NUM, &battery_value);
 		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
+	}
+
+
+	// Check Fuel Gauge (LiPo battery level), TWI (I2C)
+	if (using_component(FUEL_GAUGE, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Checking Fuel Gauge with I2C/TWI...");
+		NRF_LOG_INFO("-----------------------------------");
+
+		err_code = 1;
+		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
+
+			err_code = read_fuel_gauge();
+
+//			nrf_delay_ms(1000);
+
+			if (err_code) {
+				NRF_LOG_INFO("* RETRY: Fuel Gauge error, err_code=%d *", err_code);
+				avoided_error_cnt++;
+				nrf_delay_ms(TWI_RETRY_WAIT);
+			}
+		}
+
+		if (err_code) {
+			NRF_LOG_INFO("** ERROR: Fuel Gauge read, err_code=%d **", err_code);
+			fuel_v_cell = 0;
+			fuel_percent = 0;
+			err_cnt++;
+			fuel_gauge_error_cnt_total++;
+		}
+
+		// Read Fuel
+		NRF_LOG_INFO("fuel_v_cell: %d", fuel_v_cell);
+		NRF_LOG_INFO("fuel_percent: %d", fuel_percent);
 	}
 
 
@@ -1615,6 +1817,10 @@ void get_data(component_type components_used[]) {
 		nrf_gpio_cfg_output(SHARP_PM_LED);
 		nrf_gpio_pin_clear(SHARP_PM_LED);
 	}
+	// Turn OFF Sample LED
+    nrf_gpio_cfg_output(SAMPLE_LED);
+	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
+
 }
 
 
@@ -1665,6 +1871,20 @@ int test_main(component_type components_used[]) {
 
 	// FOR TESTING: initial delay so things can settle
 	nrf_delay_ms(INITIAL_SETTLING_WAIT);
+	// Initialize things
+	if (using_component(FUEL_GAUGE, components_used)) {
+		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
+	    // TEST FUEL GAUGE
+		if (!has_quick_started_fuel_gauge) {
+//			nrf_delay_ms(3000);
+			NRF_LOG_INFO("Quick starting fuel gauge..");
+			fuel_gauge_quick_start();
+			has_quick_started_fuel_gauge = true;
+		//	nrf_delay_ms(5000);
+		}
+
+	}
+
 
 	// All the measurements happen here
 	err_cnt = 0;
@@ -1688,6 +1908,11 @@ int test_main(component_type components_used[]) {
 	}
 
 
+	// Uninitialize things
+	if (using_component(FUEL_GAUGE, components_used)) {
+		fuel_gauge_sleep();	// Turn off to save power
+	}
+
     // ADP sleep, turn OFF all power
 	if (using_component(ADP, components_used)) {
 		NRF_LOG_INFO("");
@@ -1701,6 +1926,26 @@ int test_main(component_type components_used[]) {
 	//	nrf_gpio_pin_set(STATUS_LED);	// Enable LOW, Turn OFF LED
 		nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
 	}
+
+	// FOR TESTING: Deep Sleep, NOTE: stuck here forever!
+	if (using_component(DEEP_SLEEP, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("DEEP SLEEP: Turning OFF CPU...");
+		NRF_LOG_INFO("------------------------------");
+
+		while (1) {
+			// Wait for event.
+			__WFE();
+			NRF_LOG_INFO("Woke Temporarily");
+
+			// Clear Event Register.
+			__SEV();
+	//		NRF_LOG_INFO("Woke Temporarily");
+			__WFE();
+	//		NRF_LOG_INFO("Woke Temporarily");
+		}
+	}
+
 
 	// Feed the Watchdog Timer
 	NRF_LOG_INFO("");
@@ -1784,6 +2029,11 @@ int test_all(component_type components_used[])
 //    NRF_LOG_INFO("err_code: %d", err_code);
     APP_ERROR_CHECK(err_code);
 
+
+//    // TEST FUEL GAUGE
+////	nrf_delay_ms(5000);
+//    fuel_gauge_quick_start();	// NOTE: CAN'T DO THIS SINCE HAP I2C IS OFF AT THIS POINT
+////	nrf_delay_ms(5000);
 
 
 //    int num_test_main = 3;	// Each loop takes ~ 12s
@@ -1908,14 +2158,16 @@ int main(void) {
 	component_type components_used[] = {
 			ADP,		// DIG
 			TEMP_NRF,	// REGISTER
-			FIGARO_CO2,	// I2C,			579
+//			FIGARO_CO2,	// I2C,			579
 			RTC,		// I2C
-			BME,		// I2C
-			SMALL_PLANTOWER,	// I2C,	2
-			SHARP,		// AIN + DIG,	70
-			SPEC_CO,	// AIN,			102
-			FIGARO_CO,	// AIN,			1643
+//			BME,		// I2C
+//			SMALL_PLANTOWER,	// I2C,	2
+//			SHARP,		// AIN + DIG,	70
+//			SPEC_CO,	// AIN,			102
+//			FIGARO_CO,	// AIN,			1643
 			BATTERY,	// AIN(no pin),	3279
+//			FUEL_GAUGE,	// I2C
+//			DEEP_SLEEP,
 	};
 	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 
