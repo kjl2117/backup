@@ -98,6 +98,12 @@
 #define NUM_SAMPLES_PER_ON_CYCLE	1	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
+#define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
+#define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
+#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
+#define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
+
+// Counter variables
 static uint32_t loop_num = 0;
  static uint32_t avoided_error_cnt = 0;
  static uint32_t avoided_error_cnt_total = 0;
@@ -113,16 +119,17 @@ static uint32_t loop_num = 0;
 static ret_code_t err_code;
 
 
-
 /** SD Card Variables.  From example: peripheral/fatfs **/
 #define FILE_NAME   "test.TXT"
 #define MAX_OUT_STR_SIZE	200
 #define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+#define SD_SYSTEM_RESET_WAIT	2000	//ms
 static FATFS fs;
 static FIL file;
 FRESULT ff_result;
 char* TEST_STRING = "SD card test, v09.\r\n";
 static int header_is_written = 0;
+static bool sd_write_failed = false;
 
 /** ADC Card Variables.  From example: example_code/saadc_simpler	**/
 #define SAMPLES_IN_BUFFER 1		// It will read each time, but only enter saadc_callback() after buffer is full
@@ -147,7 +154,7 @@ const int figCO2_addr = 0x69; // 8bit I2C address, 0x69 for figaro CO2.  0x68 al
 static int32_t bme_temp_C = 0;	// units: degC*100
 static int32_t bme_humidity = 0;	// units: %RH*1000
 static uint32_t bme_pressure = 0;	// units: Pa
-const int bme_addr = 0x77; // 8bit I2C address, 0x69 for figaro CO2.  0x68 also available
+const int bme_addr = 0x76;	//0x77; // 8bit I2C address, 0x76 or 0x77
 #define BME_BUFF_SIZE	8
 // All of the calibration values
 static int has_read_calib_data = 0;
@@ -212,12 +219,27 @@ static nrf_saadc_value_t figCO_value;
 #define BATTERY_CHANNEL_NUM		4
 static nrf_saadc_value_t battery_value;
 
-/** Fuel Gauge Check Variables **/
+/** Fuel Gauge Check Variables (TWI) **/
 const int fuel_addr = 0x36; // 8bit I2C address, 0x68 for RTC
 static uint16_t fuel_v_cell = 0;	// units: mV
 static uint32_t fuel_percent = 0;	// units: percent*1000
 #define MAX17043_to_mV	1.25
 static bool has_quick_started_fuel_gauge = false;
+
+/** UV Sensor SI1145 (TWI) **/
+const int UV_SI1145_addr = 0x60; // 8bit I2C address, 0x68 for RTC
+#define SI1145_REG_UCOEFF0  			0x13
+#define SI1145_PARAM_CHLIST				0x01
+#define SI1145_PARAM_CHLIST_ENUV 		0x80	// Enable UV sensor
+#define SI1145_PARAM_CHLIST_ENAUX 		0x40	//
+#define SI1145_PARAM_CHLIST_ENALSIR 	0x20
+#define SI1145_PARAM_CHLIST_ENALSVIS 	0x10
+#define SI1145_REG_MEASRATE0 			0x08
+#define SI1145_REG_COMMAND  			0x18
+#define SI1145_ALS_AUTO   				0x0E
+static uint16_t UV_SI1145_VIS_value = 0;	// units:
+static uint16_t UV_SI1145_IR_value = 0;		// units:
+static uint16_t UV_SI1145_UV_value = 0;		// units: 100*UV Index
 
 /** Small Plantower (TWI) **/
 #define PLANTOWER_TWI_BUFF_SIZE		32
@@ -266,13 +288,13 @@ static int wdt_triggered = 0;
 /** APP TIMERS **/
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
-#define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
+//#define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
 static int plantower_startup_wait_done = 0;
 APP_TIMER_DEF(plantower_startup_timer);
-#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
+//#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
 static int hpm_startup_wait_done = 0;
 APP_TIMER_DEF(hpm_startup_timer);
-#define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
+//#define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 
 // Pins for the custom Sensen boards
 #define TWI_SCL_PIN			27		///< 	P0.27 SCL pin.
@@ -283,8 +305,8 @@ APP_TIMER_DEF(hpm_startup_timer);
 #define GPIO_TEST_PIN		23		///< 	P0.23 random pin for testing
 
 #define SHARP_PM_LED		15
-#define SHARP_PM_PIN		NRF_SAADC_INPUT_AIN3		///< 	P0.05 AIN3 pin.
-#define SPEC_CO_PIN			NRF_SAADC_INPUT_AIN1		///< 	P0.03 AIN1 pin.
+#define SHARP_PM_PIN		NRF_SAADC_INPUT_AIN1	//NRF_SAADC_INPUT_AIN3			///< 	P0.05 AIN3 pin.
+#define SPEC_CO_PIN			NRF_SAADC_INPUT_AIN3	//NRF_SAADC_INPUT_AIN1		///< 	P0.03 AIN1 pin.
 #define FIG_CO_PIN			NRF_SAADC_INPUT_AIN7		///< 	P0.31 AIN7 pin.
 #define BATTERY_PIN			NRF_SAADC_INPUT_VDD			///< 	NO PIN, VDD internally
 
@@ -294,7 +316,8 @@ APP_TIMER_DEF(hpm_startup_timer);
 #define SDC_MOSI_PIN		23		///< 	SDC serial data in (DI) pin.
 #define SDC_MISO_PIN		24		///< 	SDC serial data out (DO) pin.
 #define SDC_CS_PIN			22		///< 	SDC chip select (CS) pin.
-#define ADP_PIN				20		///< 	20/19, ADP1/ADP2 pin for cutting power, sleep/wake
+#define ADP1_PIN			20		///< 	20/19, ADP1/ADP2 pin for cutting power, sleep/wake;	BME, SD, RTC, SPEC_CO
+#define ADP2_PIN			19		///< 	20/19, ADP1/ADP2 pin for cutting power, sleep/wake;	PLANTOWER, FIG_CO2
 #define STATUS_LED			18		///< 	Red
 #define SAMPLE_LED			17		///< 	Yellow
 
@@ -309,6 +332,7 @@ typedef enum {
 	FIGARO_CO2,	// I2C
 	RTC,		// I2C
 	BME,		// I2C
+	UV_SI1145,	// I2C
 	ADC,		// AIN
 	SHARP,		// AIN
 	SPEC_CO,	// AIN
@@ -666,6 +690,10 @@ void twi_init (void)
 
     err_code = nrf_drv_twi_init(&m_twi, &twi_config, NULL, NULL);
     APP_ERROR_CHECK(err_code);
+
+//    nrf_drv_twi_disable(&m_twi);	// for saving power
+
+
 }
 
 // 2's Complement
@@ -1073,23 +1101,23 @@ static ret_code_t fuel_gauge_quick_start() {
 // Sleep Fuel Gauge MAX17043 with TWI (I2C), for saving power
 static ret_code_t fuel_gauge_sleep() {
 
-//	uint8_t regt = 0x0C;	// CONFIG register
-//	uint8_t cmd[] = { 	regt, 	// reg address to write to
-//						0x97, 	// default values
-//						0x80,	// sleep bit = 1, clears alert bit, alert threshold = 32%
-//	};
-//
-//    nrf_drv_twi_enable(&m_twi);		// for saving power
-//
-//    // Get battery voltage
-//    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
-//    if (err_code) {	// handle error outside
-//    	NRF_LOG_INFO("** WARNING in fuel_gauge_sleep(), err_code: %d **", err_code);
-//    	return err_code;
-//    }
-////    APP_ERROR_CHECK(err_code);
-//
-//    nrf_drv_twi_disable(&m_twi);		// for saving power
+	uint8_t regt = 0x0C;	// CONFIG register
+	uint8_t cmd[] = { 	regt, 	// reg address to write to
+						0x97, 	// default values
+						0x80,	// sleep bit = 1, clears alert bit, alert threshold = 32%
+	};
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Get battery voltage
+    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_INFO("** WARNING in fuel_gauge_sleep(), err_code: %d **", err_code);
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
 
     return err_code;
 
@@ -1098,23 +1126,23 @@ static ret_code_t fuel_gauge_sleep() {
 // Wake Fuel Gauge MAX17043 with TWI (I2C), for saving power
 static ret_code_t fuel_gauge_wake() {
 
-//	uint8_t regt = 0x0C;	// CONFIG register
-//	uint8_t cmd[] = { 	regt, 	// reg address to write to
-//						0x97, 	// default values
-//						0x00,	// sleep bit = 0, clears alert bit, alert threshold = 32%
-//	};
-//
-//    nrf_drv_twi_enable(&m_twi);		// for saving power
-//
-//    // Get battery voltage
-//    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
-//    if (err_code) {	// handle error outside
-//    	NRF_LOG_INFO("** WARNING in fuel_gauge_wake(), err_code: %d **", err_code);
-//    	return err_code;
-//    }
-////    APP_ERROR_CHECK(err_code);
-//
-//    nrf_drv_twi_disable(&m_twi);		// for saving power
+	uint8_t regt = 0x0C;	// CONFIG register
+	uint8_t cmd[] = { 	regt, 	// reg address to write to
+						0x97, 	// default values
+						0x00,	// sleep bit = 0, clears alert bit, alert threshold = 32%
+	};
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Get battery voltage
+    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_INFO("** WARNING in fuel_gauge_wake(), err_code: %d **", err_code);
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
 
     return err_code;
 
@@ -1166,6 +1194,101 @@ static ret_code_t read_fuel_gauge() {
 
 }
 
+
+// UV Sensor SI1145 Initialization
+static ret_code_t UV_SI1145_init() {
+
+	uint8_t regt;
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Write default coefficients, maybe later read and overwrite with product-calibrated ones
+    regt = SI1145_REG_UCOEFF0;
+    uint8_t cmd0[] = {regt, 0x29, 0x89, 0x02, 0x00	};
+    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, cmd0, 5, false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_INFO("** WARNING in UV_SI1145_init(), err_code: %d **", err_code);
+    	return err_code;
+    }
+
+    // Enable measurements
+    regt = SI1145_PARAM_CHLIST;
+    uint8_t cmd1[] = {	regt, SI1145_PARAM_CHLIST_ENUV |
+			  SI1145_PARAM_CHLIST_ENALSIR | SI1145_PARAM_CHLIST_ENALSVIS	};
+    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, cmd1, 4, false);
+
+    // Setup for auto run
+    regt = SI1145_REG_MEASRATE0;	// measurement rate for auto
+    uint8_t cmd2[] = {	regt, 0xFF	};	// 255 * 31.25uS = 8ms
+    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, cmd2, 2, false);
+    regt = SI1145_REG_COMMAND;		// setup auto send for sensors
+    uint8_t cmd3[] = {	regt, SI1145_ALS_AUTO	};
+    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, cmd3, 2, false);
+
+
+//    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, &regt, 1, true);
+//    if (err_code) {	// handle error outside
+//    	NRF_LOG_INFO("** WARNING in read_fuel_gauge(), err_code: %d **", err_code);
+//    	return err_code;
+//    }
+////    APP_ERROR_CHECK(err_code);
+//	err_code = nrf_drv_twi_rx(&m_twi, UV_SI1145_addr, cmd, 2);
+//    APP_ERROR_CHECK(err_code);
+//    // Convert and save
+//    fuel_v_cell = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
+//    fuel_v_cell = (fuel_v_cell >> 4) * MAX17043_to_mV;	// last 4 bits are nothing, convert to mV
+
+
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+
+}
+
+
+
+// UV Sensor SI1145 read: UV, VIS, IR sensors
+static ret_code_t UV_SI1145_read() {
+
+	uint8_t regt;
+    uint8_t cmd[4];
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+
+    // Read the IR and VIS data
+    regt = 0x22;	// start of VIS, then IR data
+    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, &regt, 1, true);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_INFO("** WARNING in UV_SI1145_read(), err_code: %d **", err_code);
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
+	err_code = nrf_drv_twi_rx(&m_twi, UV_SI1145_addr, cmd, 4);
+    APP_ERROR_CHECK(err_code);
+    // Convert and save
+    UV_SI1145_VIS_value = 	cmd[0] | (cmd[1] << 8);	// combine 2 bytes (MSB is 2nd)
+    UV_SI1145_IR_value = 	cmd[2] | (cmd[3] << 8);	// combine 2 bytes (MSB is 2nd)
+
+
+    // Read the UV data
+    regt = 0x2C;	// start of UV data
+    err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, &regt, 1, true);
+    APP_ERROR_CHECK(err_code);
+	err_code = nrf_drv_twi_rx(&m_twi, UV_SI1145_addr, cmd, 2);
+    APP_ERROR_CHECK(err_code);
+    // Convert and save
+    UV_SI1145_UV_value = 	cmd[0] | (cmd[1] << 8);	// combine 2 bytes (MSB is 2nd)
+
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+
+}
 
 
 // Read Small Plantower with TWI (I2C)
@@ -1246,6 +1369,8 @@ int32_t get_temp_nrf(void) {
 }
 
 
+
+
 // Initialize SD
 void sd_init() {
 	/**
@@ -1313,7 +1438,12 @@ void sd_write_str(const void* buff) {
 
 	ff_result = f_write(&file, buff, strlen(buff), (UINT *) &bytes_written);
 	if (ff_result != FR_OK)	{
-		NRF_LOG_INFO("Write failed\r\n.");
+		NRF_LOG_INFO("** ERROR: Write failed, ff_result: %d\r\n.", ff_result);
+		// Reset the system if it's not working properly
+		sd_write_failed = true;
+//		nrf_delay_ms(SD_SYSTEM_RESET_WAIT);
+//		NVIC_SystemReset();
+
 	}
 	else {
 		NRF_LOG_INFO("%d bytes written.", bytes_written);
@@ -1380,6 +1510,8 @@ void get_data(component_type components_used[]) {
 	// Turn on Sample LED
     nrf_gpio_cfg_output(SAMPLE_LED);
 	nrf_gpio_pin_set(SAMPLE_LED);	// Enable HIGH, Turn ON LED
+//    // TWI (I2C) init
+//    twi_init();
 	// Sharp PM, Turn LED OFF (high)
 	if (using_component(SHARP, components_used)) {
 	    nrf_gpio_cfg_output(SHARP_PM_LED);
@@ -1522,7 +1654,7 @@ void get_data(component_type components_used[]) {
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm
-			set_rtc(00, 07, 21, 2, 19, 3, 18);	// about 11 seconds of delay
+			set_rtc(00, 58, 00, 3, 27, 3, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -1605,7 +1737,7 @@ void get_data(component_type components_used[]) {
 	// Spec CO, Analog read.  TODO: implement averaging over 128 samples
 	if (using_component(SPEC_CO, components_used)) {
 		NRF_LOG_INFO("");
-		NRF_LOG_INFO("Testing Spec CO... (not connected)");
+		NRF_LOG_INFO("Testing Spec CO...");
 		NRF_LOG_INFO("------------------");
 
 		// Pre-read wait, prevents garbage reading
@@ -1660,6 +1792,10 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
 	}
 
+	// TODO: Maybe nrf_drv_saadc_uninit() here to save power: "The SAADC is only enabled before sampling and disabled when sampling completes to avoid high current consumption of the EasyDMA"
+
+
+
 
 	// Check Fuel Gauge (LiPo battery level), TWI (I2C)
 	if (using_component(FUEL_GAUGE, components_used)) {
@@ -1695,7 +1831,21 @@ void get_data(component_type components_used[]) {
 	}
 
 
-	// TODO: Maybe nrf_drv_saadc_uninit() here to save power: "The SAADC is only enabled before sampling and disabled when sampling completes to avoid high current consumption of the EasyDMA"
+	// UV Sensor SI1145, TWI (I2C)
+	if (using_component(UV_SI1145, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Testing UV Sensor SI1145 with I2C/TWI...");
+		NRF_LOG_INFO("----------------------------------------");
+
+		// Init sensor
+		UV_SI1145_init();
+
+		// Read the data
+		UV_SI1145_read();
+		NRF_LOG_INFO("UV_SI1145_VIS_value: %d", UV_SI1145_VIS_value);
+		NRF_LOG_INFO("UV_SI1145_IR_value: %d", UV_SI1145_IR_value);
+		NRF_LOG_INFO("UV_SI1145_UV_value: %d", UV_SI1145_UV_value);
+	}
 
 
 	// Small Plantower, TWI (I2C)
@@ -1817,6 +1967,8 @@ void get_data(component_type components_used[]) {
 		nrf_gpio_cfg_output(SHARP_PM_LED);
 		nrf_gpio_pin_clear(SHARP_PM_LED);
 	}
+//	// TWI (I2C) UNinit
+//    nrf_drv_twi_uninit(&m_twi);
 	// Turn OFF Sample LED
     nrf_gpio_cfg_output(SAMPLE_LED);
 	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
@@ -1844,12 +1996,20 @@ int test_main(component_type components_used[]) {
 	NRF_LOG_INFO("WAKE: Turning ON ADP Power...");
 	NRF_LOG_INFO("-----------------------------");
 
-    nrf_gpio_cfg_output(ADP_PIN);
+    nrf_gpio_cfg_output(ADP1_PIN);
+	NRF_LOG_INFO("ADP1_PIN.");
+    nrf_gpio_cfg_output(ADP2_PIN);
+	NRF_LOG_INFO("ADP2_PIN.");
     nrf_gpio_cfg_output(STATUS_LED);
 	NRF_LOG_INFO("HIGH.");
-	nrf_gpio_pin_set(ADP_PIN);		// Enable HIGH
+	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
+	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
 //	nrf_gpio_pin_clear(STATUS_LED);	// Enable LOW, Turn ON LED
 	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
+
+//	nrf_delay_ms(500);
+//	NRF_LOG_FLUSH();
+//	nrf_delay_ms(500);
 
 
 	// Start timer for DHT startup wait (settling time is ~1.5s)
@@ -1869,18 +2029,21 @@ int test_main(component_type components_used[]) {
 		APP_ERROR_CHECK(err_code);
 	}
 
-	// FOR TESTING: initial delay so things can settle
+
+	// Initialize things before getting data
+	// Initial delay so things can settle
 	nrf_delay_ms(INITIAL_SETTLING_WAIT);
-	// Initialize things
+    // TWI (I2C) init
+    twi_init();
+    // Init Fuel Gauge
 	if (using_component(FUEL_GAUGE, components_used)) {
 		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
-	    // TEST FUEL GAUGE
-		if (!has_quick_started_fuel_gauge) {
-//			nrf_delay_ms(3000);
+	    // Quick start once for initial guess
+//		if (!has_quick_started_fuel_gauge) {
+		if (0) {
 			NRF_LOG_INFO("Quick starting fuel gauge..");
 			fuel_gauge_quick_start();
 			has_quick_started_fuel_gauge = true;
-		//	nrf_delay_ms(5000);
 		}
 
 	}
@@ -1912,6 +2075,10 @@ int test_main(component_type components_used[]) {
 	if (using_component(FUEL_GAUGE, components_used)) {
 		fuel_gauge_sleep();	// Turn off to save power
 	}
+	// TWI (I2C) UNinit
+    nrf_drv_twi_uninit(&m_twi);
+
+
 
     // ADP sleep, turn OFF all power
 	if (using_component(ADP, components_used)) {
@@ -1919,13 +2086,16 @@ int test_main(component_type components_used[]) {
 		NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
 		NRF_LOG_INFO("-------------------------------");
 
-		nrf_gpio_cfg_output(ADP_PIN);
-		nrf_gpio_cfg_output(STATUS_LED);
+		nrf_gpio_cfg_output(ADP1_PIN);
+		nrf_gpio_cfg_output(ADP2_PIN);
 		NRF_LOG_INFO("LOW.");
-		nrf_gpio_pin_clear(ADP_PIN);	// Enable HIGH, Turn OFF ADP
-	//	nrf_gpio_pin_set(STATUS_LED);	// Enable LOW, Turn OFF LED
-		nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+		nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH, Turn OFF ADP
+		nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH, Turn OFF ADP
 	}
+	nrf_gpio_cfg_output(STATUS_LED);
+//	nrf_gpio_pin_set(STATUS_LED);	// Enable LOW, Turn OFF LED
+	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+
 
 	// FOR TESTING: Deep Sleep, NOTE: stuck here forever!
 	if (using_component(DEEP_SLEEP, components_used)) {
@@ -1952,6 +2122,12 @@ int test_main(component_type components_used[]) {
 	NRF_LOG_INFO("Feeding the Watchdog..");
 	NRF_LOG_INFO("----------------------");
 	NRF_LOG_INFO("WDT_TIMEOUT: %d ms", WDT_TIMEOUT);
+	// check if SD card failed
+	if (sd_write_failed) {
+		NRF_LOG_INFO("ERROR: sd_write_failed: %d", sd_write_failed);
+		// wait until wdt runs out
+		while (1) {}
+	}
     nrf_drv_wdt_channel_feed(wdt_channel_id);
 
     // Ending stuff
@@ -1975,17 +2151,28 @@ int test_main(component_type components_used[]) {
 int test_all(component_type components_used[])
 {
 
+	// Initial delay so Fuel Gauge starts with good initial guess
+	if (using_component(FUEL_GAUGE, components_used)) {
+		nrf_delay_ms(INITIAL_FUEL_GAUGE_WAIT);
+	}
+
+
     /** Initialize general stuff	**/
     bsp_board_leds_init();
     // NRF_LOG setup
     APP_ERROR_CHECK(NRF_LOG_INIT(NULL));
     NRF_LOG_DEFAULT_BACKENDS_INIT();
 
+
+
     // TODO: Check USING_PLANTOWER && USING_HONEYWELL
 	// ADC setup
     saadc_init();
-    // TWI (I2C) init
-    twi_init();
+//    // TWI (I2C) init
+//    twi_init();
+//    nrf_delay_ms(1000);
+//    nrf_drv_twi_uninit(&m_twi);
+
 
     // Startup Message
 	NRF_LOG_INFO("");
@@ -2012,8 +2199,10 @@ int test_all(component_type components_used[])
 
     // ADP, turn OFF all power: start with power off when entering loop.
 	NRF_LOG_INFO("Starting with ADP Power OFF... LOW");
-    nrf_gpio_cfg_output(ADP_PIN);
-	nrf_gpio_pin_clear(ADP_PIN);	// Enable HIGH
+    nrf_gpio_cfg_output(ADP1_PIN);
+	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
+    nrf_gpio_cfg_output(ADP2_PIN);
+	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH
 
 
 	// Prepare timer for startup wait (depends on each sensor)
@@ -2030,12 +2219,6 @@ int test_all(component_type components_used[])
     APP_ERROR_CHECK(err_code);
 
 
-//    // TEST FUEL GAUGE
-////	nrf_delay_ms(5000);
-//    fuel_gauge_quick_start();	// NOTE: CAN'T DO THIS SINCE HAP I2C IS OFF AT THIS POINT
-////	nrf_delay_ms(5000);
-
-
 //    int num_test_main = 3;	// Each loop takes ~ 12s
 //	for (int i=0; i < num_test_main; i++) {
 	while (1) {
@@ -2050,6 +2233,7 @@ int test_all(component_type components_used[])
 		NRF_LOG_INFO("err_cnt_total = %d", err_cnt_total);
 		NRF_LOG_INFO("dht_error_cnt_total = %d", dht_error_cnt_total);
 		NRF_LOG_INFO("hpm_error_cnt_total = %d", hpm_error_cnt_total);
+		NRF_LOG_INFO("LOG_INTERVAL = %d", LOG_INTERVAL);
 		NRF_LOG_INFO("*** test_main() COMPLETE!, next loop_num: %d ***", loop_num);
 		NRF_LOG_FLUSH();
 
@@ -2057,7 +2241,7 @@ int test_all(component_type components_used[])
 	}
 
 	NRF_LOG_INFO("");
-	NRF_LOG_INFO("***** LOOPING COMPLETE! *****");
+	NRF_LOG_INFO("***** ALL LOOPING COMPLETE! *****");
 
 	return NRF_SUCCESS;
 
@@ -2067,87 +2251,86 @@ int test_all(component_type components_used[])
 /**
  * Test only the components needed for the SUM
  */
-int test_SUM(int entering_deep_sleep) {
-
-    // Startup Message
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("-----------------------");
-	NRF_LOG_INFO("| TEST SUM COMPONENTS |");
-	NRF_LOG_INFO("-----------------------");
-
-
-    // ADP, turn ON all power
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("WAKE: Turning ON ADP Power...");
-	NRF_LOG_INFO("-----------------------------");
-    nrf_gpio_cfg_output(ADP_PIN);
-    nrf_gpio_cfg_output(STATUS_LED);
-    nrf_gpio_cfg_output(SAMPLE_LED);
-	NRF_LOG_INFO("HIGH.");
-
-	nrf_gpio_pin_set(ADP_PIN);		// Enable HIGH
-//	nrf_gpio_pin_clear(STATUS_LED);	// Enable LOW, Turn ON LED
-	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
-	nrf_gpio_pin_set(SAMPLE_LED);	// Enable HIGH, Turn ON LED
-
-
-	// Test the internal temp reading
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("Internal Temp Reading");
-	NRF_LOG_INFO("---------------------");
-    int32_t temp_nrf = 0;
-	temp_nrf = get_temp_nrf();
-	NRF_LOG_INFO("temp_nrf = %d", temp_nrf);
-//		nrf_delay_ms(500);
-
-
-	// Save the data to SD card
-	save_data();
-
-    // ADP sleep, turn OFF all power
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
-	NRF_LOG_INFO("-------------------------------");
-
-    nrf_gpio_cfg_output(ADP_PIN);
-    nrf_gpio_cfg_output(STATUS_LED);
-    nrf_gpio_cfg_output(SAMPLE_LED);
-	NRF_LOG_INFO("LOW.");
-
-
-    // ADP, turn OFF all power
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
-	NRF_LOG_INFO("-------------------------------");
-	nrf_gpio_pin_clear(ADP_PIN);	// Enable HIGH, Turn OFF ADP
-	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
-	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
-
-
-	// Deep Sleep
-	if (entering_deep_sleep) {
-		NRF_LOG_INFO("");
-		NRF_LOG_INFO("DEEP SLEEP: Turning OFF CPU...");
-		NRF_LOG_INFO("------------------------------");
-
-		while (1) {
-			// Wait for event.
-			__WFE();
-			NRF_LOG_INFO("Woke Temporarily");
-
-			// Clear Event Register.
-			__SEV();
-	//		NRF_LOG_INFO("Woke Temporarily");
-			__WFE();
-	//		NRF_LOG_INFO("Woke Temporarily");
-		}
-	}
-
-
-	return err_code;
-
-
-}
+//int test_SUM(int entering_deep_sleep) {
+//
+//    // Startup Message
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("-----------------------");
+//	NRF_LOG_INFO("| TEST SUM COMPONENTS |");
+//	NRF_LOG_INFO("-----------------------");
+//
+//
+//    // ADP, turn ON all power
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("WAKE: Turning ON ADP Power...");
+//	NRF_LOG_INFO("-----------------------------");
+//    nrf_gpio_cfg_output(ADP1_PIN);
+//    nrf_gpio_cfg_output(ADP2_PIN);
+//    nrf_gpio_cfg_output(STATUS_LED);
+//    nrf_gpio_cfg_output(SAMPLE_LED);
+//	NRF_LOG_INFO("HIGH.");
+//
+//	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
+//	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
+////	nrf_gpio_pin_clear(STATUS_LED);	// Enable LOW, Turn ON LED
+//	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
+//	nrf_gpio_pin_set(SAMPLE_LED);	// Enable HIGH, Turn ON LED
+//
+//
+//	// Test the internal temp reading
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("Internal Temp Reading");
+//	NRF_LOG_INFO("---------------------");
+//    int32_t temp_nrf = 0;
+//	temp_nrf = get_temp_nrf();
+//	NRF_LOG_INFO("temp_nrf = %d", temp_nrf);
+////		nrf_delay_ms(500);
+//
+//
+//	// Save the data to SD card
+//	save_data();
+//
+//    // ADP sleep, turn OFF all power
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
+//	NRF_LOG_INFO("-------------------------------");
+//
+//    nrf_gpio_cfg_output(ADP1_PIN);
+//    nrf_gpio_cfg_output(ADP2_PIN);
+//    nrf_gpio_cfg_output(STATUS_LED);
+//    nrf_gpio_cfg_output(SAMPLE_LED);
+//	NRF_LOG_INFO("LOW.");
+//
+//	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH, Turn OFF ADP
+//	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH, Turn OFF ADP
+//	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+//	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
+//
+//
+//	// Deep Sleep
+//	if (entering_deep_sleep) {
+//		NRF_LOG_INFO("");
+//		NRF_LOG_INFO("DEEP SLEEP: Turning OFF CPU...");
+//		NRF_LOG_INFO("------------------------------");
+//
+//		while (1) {
+//			// Wait for event.
+//			__WFE();
+//			NRF_LOG_INFO("Woke Temporarily");
+//
+//			// Clear Event Register.
+//			__SEV();
+//	//		NRF_LOG_INFO("Woke Temporarily");
+//			__WFE();
+//	//		NRF_LOG_INFO("Woke Temporarily");
+//		}
+//	}
+//
+//
+//	return err_code;
+//
+//
+//}
 
 
 /**
@@ -2156,22 +2339,25 @@ int test_SUM(int entering_deep_sleep) {
 int main(void) {
 
 	component_type components_used[] = {
-			ADP,		// DIG
-			TEMP_NRF,	// REGISTER
-//			FIGARO_CO2,	// I2C,			579
-			RTC,		// I2C
-//			BME,		// I2C
-//			SMALL_PLANTOWER,	// I2C,	2
-//			SHARP,		// AIN + DIG,	70
-//			SPEC_CO,	// AIN,			102
-//			FIGARO_CO,	// AIN,			1643
+//			ADP,		// DIG
 			BATTERY,	// AIN(no pin),	3279
-//			FUEL_GAUGE,	// I2C
+			FUEL_GAUGE,	// I2C
+			TEMP_NRF,	// REGISTER
+			RTC,		// I2C
+			BME,		// I2C
+//			UV_SI1145,		// I2C
+//			SHARP,		// AIN + DIG,	70
+//			FIGARO_CO,	// AIN,			1643
+			SMALL_PLANTOWER,	// I2C,	2
+			SPEC_CO,	// AIN,			102
+			FIGARO_CO2,	// I2C,			579
 //			DEEP_SLEEP,
 	};
 	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 
 	err_code = test_all(components_used);
+
+
 
 
 
