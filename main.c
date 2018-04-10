@@ -62,13 +62,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "nrf_drv_saadc.h"
 #include <math.h>
 #include "boards.h"
 #include "app_error.h"
 #include "nrf_delay.h"
 #include "app_util_platform.h"
-#include <string.h>
 #include "nrf_drv_twi.h"
 #include "Dht22.h"
 #include "nrf_gpio.h"
@@ -88,13 +88,43 @@
 #include "nrf_drv_wdt.h"
 #include "nrf_temp.h"
 
+// Taken from ble_app_uart
+//#include <stdint.h>
+//#include <string.h>
+#include "nordic_common.h"
+//#include "nrf.h"
+#include "ble_hci.h"
+#include "ble_advdata.h"
+#include "ble_advertising.h"
+#include "ble_conn_params.h"
+#include "nrf_sdh.h"
+#include "nrf_sdh_soc.h"
+#include "nrf_sdh_ble.h"
+#include "nrf_ble_gatt.h"
+//#include "app_timer.h"
+#include "ble_nus.h"
+//#include "app_uart.h"
+//#include "app_util_platform.h"
+#include "bsp_btn_ble.h"
+//#if defined (UART_PRESENT)
+//#include "nrf_uart.h"
+//#endif
+//#if defined (UARTE_PRESENT)
+//#include "nrf_uarte.h"
+//#endif
+//#include "nrf_log.h"
+//#include "nrf_log_ctrl.h"
+//#include "nrf_log_default_backends.h"
+
+
 
 /** GLOBAL VARIABLES **/
 //--------------------//
 
 /** Overall **/
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
-#define LOG_INTERVAL				5*1000		// ms between sleep/wake
+#define SD_FAIL_SHUTDOWN			0	// If true, will enter infinite loop when SD fails (and wdt will reset)
+#define LOG_INTERVAL				4*1000		// ms between sleep/wake
 #define NUM_SAMPLES_PER_ON_CYCLE	1	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
@@ -342,6 +372,7 @@ typedef enum {
 	SMALL_PLANTOWER,	// I2C
 	HONEYWELL,			// SERIAL
 	DEEP_SLEEP,
+	SDC,		// SD card, SPIO
 } component_type;
 
 component_type twi_sensors[] = {
@@ -1271,6 +1302,11 @@ static ret_code_t UV_SI1145_read() {
     // Convert and save
     UV_SI1145_VIS_value = 	cmd[0] | (cmd[1] << 8);	// combine 2 bytes (MSB is 2nd)
     UV_SI1145_IR_value = 	cmd[2] | (cmd[3] << 8);	// combine 2 bytes (MSB is 2nd)
+	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
+	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
+	NRF_LOG_INFO("cmd[2] = 0x%x", cmd[2]);
+	NRF_LOG_INFO("cmd[3] = 0x%x", cmd[3]);
+
 
 
     // Read the UV data
@@ -1281,6 +1317,8 @@ static ret_code_t UV_SI1145_read() {
     APP_ERROR_CHECK(err_code);
     // Convert and save
     UV_SI1145_UV_value = 	cmd[0] | (cmd[1] << 8);	// combine 2 bytes (MSB is 2nd)
+	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
+	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
 
 
     nrf_drv_twi_disable(&m_twi);		// for saving power
@@ -1438,9 +1476,10 @@ void sd_write_str(const void* buff) {
 
 	ff_result = f_write(&file, buff, strlen(buff), (UINT *) &bytes_written);
 	if (ff_result != FR_OK)	{
-		NRF_LOG_INFO("** ERROR: Write failed, ff_result: %d\r\n.", ff_result);
+		NRF_LOG_INFO("** ERROR: Write failed, ff_result: %d **.", ff_result);
 		// Reset the system if it's not working properly
 		sd_write_failed = true;
+		err_cnt++;
 //		nrf_delay_ms(SD_SYSTEM_RESET_WAIT);
 //		NVIC_SystemReset();
 
@@ -1653,8 +1692,8 @@ void get_data(component_type components_used[]) {
 
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
-//			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm
-			set_rtc(00, 58, 00, 3, 27, 3, 18);	// about 11 seconds of delay
+//			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
+			set_rtc(00, 59, 15, 3, 10, 4, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -1839,6 +1878,7 @@ void get_data(component_type components_used[]) {
 
 		// Init sensor
 		UV_SI1145_init();
+		nrf_delay_ms(100);	// wait for a few auto reads
 
 		// Read the data
 		UV_SI1145_read();
@@ -1997,15 +2037,35 @@ int test_main(component_type components_used[]) {
 	NRF_LOG_INFO("-----------------------------");
 
     nrf_gpio_cfg_output(ADP1_PIN);
-	NRF_LOG_INFO("ADP1_PIN.");
     nrf_gpio_cfg_output(ADP2_PIN);
-	NRF_LOG_INFO("ADP2_PIN.");
     nrf_gpio_cfg_output(STATUS_LED);
-	NRF_LOG_INFO("HIGH.");
-	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
-	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
 //	nrf_gpio_pin_clear(STATUS_LED);	// Enable LOW, Turn ON LED
+
+	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
+	NRF_LOG_INFO("ADP1_PIN: HIGH.");
+
+//	while (1) {
+//		// Wait for event.
+//		__WFE();
+//		NRF_LOG_INFO("Woke Temporarily");
+//
+//		// Clear Event Register.
+//		__SEV();
+////		NRF_LOG_INFO("Woke Temporarily");
+//		__WFE();
+////		NRF_LOG_INFO("Woke Temporarily");
+//	}
+//
+//	nrf_delay_ms(10*1000);
+
+	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
+	NRF_LOG_INFO("ADP2_PIN: HIGH.");
+
+//	nrf_delay_ms(10*1000);
+
 	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
+	NRF_LOG_INFO("STATUS_LED: HIGH.");
+
 
 //	nrf_delay_ms(500);
 //	NRF_LOG_FLUSH();
@@ -2059,7 +2119,9 @@ int test_main(component_type components_used[]) {
 		// Read all of the sensors
 		get_data(components_used);
 		// Save the data to SD card
-		save_data();
+		if (using_component(SDC, components_used)) {
+			save_data();
+		}
 
 		// Wait between multiple samples as a buffer time, just in case
 		if (NUM_SAMPLES_PER_ON_CYCLE > 1) {
@@ -2123,8 +2185,9 @@ int test_main(component_type components_used[]) {
 	NRF_LOG_INFO("----------------------");
 	NRF_LOG_INFO("WDT_TIMEOUT: %d ms", WDT_TIMEOUT);
 	// check if SD card failed
-	if (sd_write_failed) {
-		NRF_LOG_INFO("ERROR: sd_write_failed: %d", sd_write_failed);
+	if (sd_write_failed && SD_FAIL_SHUTDOWN) {
+		NRF_LOG_INFO("** FATAL ERROR: sd_write_failed: %d **", sd_write_failed);
+//		NRF_LOG_FLUSH();
 		// wait until wdt runs out
 		while (1) {}
 	}
@@ -2159,6 +2222,12 @@ int test_all(component_type components_used[])
 
     /** Initialize general stuff	**/
     bsp_board_leds_init();
+	// Turn OFF LED's
+    nrf_gpio_cfg_output(SAMPLE_LED);
+	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
+	nrf_gpio_cfg_output(STATUS_LED);
+	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+
     // NRF_LOG setup
     APP_ERROR_CHECK(NRF_LOG_INIT(NULL));
     NRF_LOG_DEFAULT_BACKENDS_INIT();
@@ -2340,18 +2409,19 @@ int main(void) {
 
 	component_type components_used[] = {
 //			ADP,		// DIG
+			SDC,		// SD card, SPIO
 			BATTERY,	// AIN(no pin),	3279
 			FUEL_GAUGE,	// I2C
 			TEMP_NRF,	// REGISTER
 			RTC,		// I2C
-			BME,		// I2C
 //			UV_SI1145,		// I2C
-//			SHARP,		// AIN + DIG,	70
-//			FIGARO_CO,	// AIN,			1643
+			BME,		// I2C
+////			SHARP,		// AIN + DIG,	70
+////			FIGARO_CO,	// AIN,			1643
 			SMALL_PLANTOWER,	// I2C,	2
 			SPEC_CO,	// AIN,			102
-			FIGARO_CO2,	// I2C,			579
-//			DEEP_SLEEP,
+//			FIGARO_CO2,	// I2C,			579
+////			DEEP_SLEEP,
 	};
 	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 

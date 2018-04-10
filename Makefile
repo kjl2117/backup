@@ -8,7 +8,8 @@ SDK_ROOT := ../nRF5
 PROJ_DIR := .
 
 $(OUTPUT_DIRECTORY)/sensen_FW.out: \
-  LINKER_SCRIPT  := fatfs_gcc_nrf52.ld
+#  LINKER_SCRIPT  := fatfs_gcc_nrf52.ld
+  LINKER_SCRIPT  := ble_app_uart_gcc_nrf52.ld
 
 # Source files common to all targets
 SRC_FILES += \
@@ -62,6 +63,19 @@ SRC_FILES += \
   $(SDK_ROOT)/components/drivers_nrf/clock/nrf_drv_clock.c \
   $(SDK_ROOT)/components/drivers_nrf/power/nrf_drv_power.c \
   $(SDK_ROOT)/components/drivers_nrf/wdt/nrf_drv_wdt.c \
+    $(SDK_ROOT)/components/ble/common/ble_advdata.c \
+  $(SDK_ROOT)/components/ble/ble_advertising/ble_advertising.c \
+  $(SDK_ROOT)/components/ble/common/ble_conn_params.c \
+  $(SDK_ROOT)/components/ble/common/ble_conn_state.c \
+  $(SDK_ROOT)/components/ble/common/ble_srv_common.c \
+  $(SDK_ROOT)/components/ble/nrf_ble_gatt/nrf_ble_gatt.c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_nus/ble_nus.c \
+  $(SDK_ROOT)/components/softdevice/common/nrf_sdh.c \
+  $(SDK_ROOT)/components/softdevice/common/nrf_sdh_ble.c \
+  $(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c \
+  $(SDK_ROOT)/components/libraries/util/sdk_mapped_flags.c \
+  $(SDK_ROOT)/components/libraries/experimental_section_vars/nrf_section_iter.c \
+
 #  $(SDK_ROOT)/components/libraries/uart/retarget.c \
 
   # From toolchain/system_nrf52.c onwards: taken from example_code/saadc_simpler
@@ -89,7 +103,6 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/libraries/experimental_section_vars \
   $(SDK_ROOT)/components/libraries/experimental_log/src \
   $(SDK_ROOT)/external/segger_rtt \
-  $(SDK_ROOT)/components/drivers_nrf/nrf_soc_nosd \
   ./config \
   $(SDK_ROOT)/components/libraries/atomic \
   $(SDK_ROOT)/components/boards \
@@ -119,8 +132,123 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/drivers_nrf/clock \
   $(SDK_ROOT)/components/drivers_nrf/power \
   $(SDK_ROOT)/components/drivers_nrf/wdt \
+    $(SDK_ROOT)/components/drivers_nrf/comp \
+  $(SDK_ROOT)/components/drivers_nrf/twi_master \
+  $(SDK_ROOT)/components/ble/ble_services/ble_ancs_c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_ias_c \
+  $(SDK_ROOT)/components/libraries/pwm \
+  $(SDK_ROOT)/components/softdevice/s132/headers/nrf52 \
+  $(SDK_ROOT)/components/libraries/usbd/class/cdc/acm \
+  $(SDK_ROOT)/components/libraries/usbd/class/hid/generic \
+  $(SDK_ROOT)/components/libraries/usbd/class/msc \
+  $(SDK_ROOT)/components/libraries/usbd/class/hid \
+  $(SDK_ROOT)/components/libraries/experimental_log \
+  $(SDK_ROOT)/components/ble/ble_services/ble_gls \
+  $(SDK_ROOT)/components/libraries/fstorage \
+  $(SDK_ROOT)/components/drivers_nrf/i2s \
+  $(SDK_ROOT)/components/libraries/mutex \
+  $(SDK_ROOT)/components/libraries/gpiote \
+  $(SDK_ROOT)/components/libraries/experimental_log/src \
+  $(SDK_ROOT)/components/drivers_nrf/gpiote \
+  $(SDK_ROOT)/components/libraries/fifo \
+  $(SDK_ROOT)/components/boards \
+  $(SDK_ROOT)/components/libraries/experimental_memobj \
+  $(SDK_ROOT)/components/drivers_nrf/common \
+  $(SDK_ROOT)/components/ble/ble_advertising \
+  $(SDK_ROOT)/components/ble/ble_services/ble_bas_c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_hrs_c \
+  $(SDK_ROOT)/components/libraries/queue \
+  $(SDK_ROOT)/components/libraries/pwr_mgmt \
+  $(SDK_ROOT)/components/ble/ble_dtm \
+  $(SDK_ROOT)/components/toolchain/cmsis/include \
+  $(SDK_ROOT)/components/ble/ble_services/ble_rscs_c \
+  $(SDK_ROOT)/components/drivers_nrf/uart \
+  $(SDK_ROOT)/components/ble/common \
+  $(SDK_ROOT)/components/ble/ble_services/ble_lls \
+  $(SDK_ROOT)/components/drivers_nrf/wdt \
+  $(SDK_ROOT)/components/libraries/bsp \
+  $(SDK_ROOT)/components/ble/ble_services/ble_bas \
+  $(SDK_ROOT)/components/libraries/experimental_section_vars \
+  $(SDK_ROOT)/components/softdevice/s132/headers \
+  $(SDK_ROOT)/components/ble/ble_services/ble_ans_c \
+  $(SDK_ROOT)/components/libraries/slip \
+  $(SDK_ROOT)/components/libraries/mem_manager \
+  $(SDK_ROOT)/external/segger_rtt \
+  $(SDK_ROOT)/components/libraries/usbd/class/cdc \
+  $(SDK_ROOT)/components/drivers_nrf/hal \
+  $(SDK_ROOT)/components/ble/ble_services/ble_nus_c \
+  $(SDK_ROOT)/components/drivers_nrf/rtc \
+  $(SDK_ROOT)/components/softdevice/common \
+  $(SDK_ROOT)/components/ble/ble_services/ble_ias \
+  $(SDK_ROOT)/components/libraries/usbd/class/hid/mouse \
+  $(SDK_ROOT)/components/libraries/ecc \
+  $(SDK_ROOT)/components/drivers_nrf/ppi \
+  $(SDK_ROOT)/components/ble/ble_services/ble_dfu \
+  $(SDK_ROOT)/external/fprintf \
+  $(SDK_ROOT)/components/drivers_nrf/twis_slave \
+  $(SDK_ROOT)/components/libraries/atomic \
+  $(SDK_ROOT)/components \
+  $(SDK_ROOT)/components/libraries/scheduler \
+  $(SDK_ROOT)/components/libraries/cli \
+  $(SDK_ROOT)/components/ble/ble_services/ble_lbs \
+  $(SDK_ROOT)/components/ble/ble_services/ble_hts \
+  $(SDK_ROOT)/components/drivers_nrf/delay \
+  $(SDK_ROOT)/components/libraries/crc16 \
+  $(SDK_ROOT)/components/drivers_nrf/timer \
+  $(SDK_ROOT)/components/libraries/util \
+  $(SDK_ROOT)/components/drivers_nrf/pwm \
+  $(SDK_ROOT)/components/libraries/csense_drv \
+  $(SDK_ROOT)/components/libraries/csense \
+  $(SDK_ROOT)/components/libraries/balloc \
+  $(SDK_ROOT)/components/libraries/low_power_pwm \
+  $(SDK_ROOT)/components/libraries/hardfault \
+  $(SDK_ROOT)/components/ble/ble_services/ble_cscs \
+  $(SDK_ROOT)/components/libraries/uart \
+  $(SDK_ROOT)/components/libraries/hci \
+  $(SDK_ROOT)/components/libraries/usbd/class/hid/kbd \
+  $(SDK_ROOT)/components/drivers_nrf/spi_slave \
+  $(SDK_ROOT)/components/drivers_nrf/lpcomp \
+  $(SDK_ROOT)/components/libraries/timer \
+  $(SDK_ROOT)/components/drivers_nrf/rng \
+  $(SDK_ROOT)/components/drivers_nrf/power \
+  $(SDK_ROOT)/components/libraries/usbd/config \
+  $(SDK_ROOT)/components/toolchain \
+  $(SDK_ROOT)/components/libraries/led_softblink \
+  $(SDK_ROOT)/components/drivers_nrf/qdec \
+  $(SDK_ROOT)/components/ble/ble_services/ble_cts_c \
+  $(SDK_ROOT)/components/drivers_nrf/spi_master \
+  $(SDK_ROOT)/components/ble/ble_services/ble_nus \
+  $(SDK_ROOT)/components/libraries/twi_mngr \
+  $(SDK_ROOT)/components/ble/ble_services/ble_hids \
+  $(SDK_ROOT)/components/libraries/strerror \
+  $(SDK_ROOT)/components/drivers_nrf/pdm \
+  $(SDK_ROOT)/components/libraries/crc32 \
+  $(SDK_ROOT)/components/libraries/usbd/class/audio \
+  $(SDK_ROOT)/components/ble/peer_manager \
+  $(SDK_ROOT)/components/drivers_nrf/swi \
+  $(SDK_ROOT)/components/ble/ble_services/ble_tps \
+  $(SDK_ROOT)/components/ble/ble_services/ble_dis \
+  $(SDK_ROOT)/components/device \
+  $(SDK_ROOT)/components/ble/nrf_ble_gatt \
+  $(SDK_ROOT)/components/ble/nrf_ble_qwr \
+  $(SDK_ROOT)/components/libraries/button \
+  $(SDK_ROOT)/components/libraries/usbd \
+  $(SDK_ROOT)/components/drivers_nrf/saadc \
+  $(SDK_ROOT)/components/libraries/atomic_fifo \
+  $(SDK_ROOT)/components/ble/ble_services/ble_lbs_c \
+  $(SDK_ROOT)/components/ble/ble_racp \
+  $(SDK_ROOT)/components/toolchain/gcc \
+  $(SDK_ROOT)/components/libraries/fds \
+  $(SDK_ROOT)/components/libraries/twi \
+  $(SDK_ROOT)/components/drivers_nrf/clock \
+  $(SDK_ROOT)/components/ble/ble_services/ble_rscs \
+  $(SDK_ROOT)/components/drivers_nrf/usbd \
+  $(SDK_ROOT)/components/ble/ble_services/ble_hrs \
+  	  $(SDK_ROOT)/components/drivers_nrf/nrf_soc_nosd \
+  	
   # From libraries/sdcard onwards: taken from example_code/saadc_simpler
   # From drivers_nrf/timer onwards: taken from peripheral/twi_sensor
+  # Note: drivers_nrf/nrf_soc_nosd also contains nrf_nvic.h, so put it later to avoid taking wrong one!
   
 # Libraries common to all targets
 LIB_FILES += \
@@ -134,7 +262,7 @@ OPT = -O0 -g3	# CHANGED to disable optimization (for debugger)
 # C flags common to all targets
 CFLAGS += $(OPT)
 CFLAGS += -DBOARD_PCA10040
-CFLAGS += -DBSP_DEFINES_ONLY
+CFLAGS += -DBSP_DEFINES_ONLY	# NOT found in ble_app_uart example
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
 CFLAGS += -DNRF52
 CFLAGS += -DNRF52832_XXAA
@@ -143,6 +271,12 @@ CFLAGS += -mcpu=cortex-m4
 CFLAGS += -mthumb -mabi=aapcs
 CFLAGS +=  -Wall -Werror
 CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
+# Extra flags found in ble_app_uart example
+CFLAGS += -DNRF_SD_BLE_API_VERSION=5
+CFLAGS += -DS132
+CFLAGS += -DSOFTDEVICE_PRESENT
+CFLAGS += -DSWI_DISABLE0
+
 # keep every function in a separate section, this allows linker to discard unused ones
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 CFLAGS += -fno-builtin -fshort-enums 
@@ -157,11 +291,16 @@ ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 ASMFLAGS += -DBOARD_PCA10040
-ASMFLAGS += -DBSP_DEFINES_ONLY
+ASMFLAGS += -DBSP_DEFINES_ONLY	# NOT found in ble_app_uart example
 ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET
 ASMFLAGS += -DNRF52
 ASMFLAGS += -DNRF52832_XXAA
 ASMFLAGS += -DNRF52_PAN_74
+# Extra flags found in ble_app_uart example
+ASMFLAGS += -DNRF_SD_BLE_API_VERSION=5
+ASMFLAGS += -DS132
+ASMFLAGS += -DSOFTDEVICE_PRESENT
+ASMFLAGS += -DSWI_DISABLE0
 
 # Linker flags
 LDFLAGS += $(OPT)
@@ -188,6 +327,7 @@ default: sensen_FW
 help:
 	@echo following targets are available:
 	@echo		sensen_FW
+	@echo		flash_softdevice
 	@echo		sdk_config - starting external tool for editing sdk_config.h
 	@echo		flash      - flashing binary
 
@@ -198,13 +338,19 @@ include $(TEMPLATE_PATH)/Makefile.common
 
 $(foreach target, $(TARGETS), $(call define_target, $(target)))
 
-.PHONY: flash erase
+.PHONY: flash flash_softdevice erase
 
 # Flash the program
 flash: $(OUTPUT_DIRECTORY)/sensen_FW.hex
 	@echo Flashing: $<
 	nrfjprog -f nrf52 --program $< --sectorerase
 	@echo Flashing complete, Reseting program
+	nrfjprog -f nrf52 --reset
+
+# Flash softdevice
+flash_softdevice:
+	@echo Flashing: s132_nrf52_5.0.0_softdevice.hex
+	nrfjprog -f nrf52 --program $(SDK_ROOT)/components/softdevice/s132/hex/s132_nrf52_5.0.0_softdevice.hex --sectorerase
 	nrfjprog -f nrf52 --reset
 
 erase:
