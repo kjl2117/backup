@@ -75,6 +75,12 @@ SRC_FILES += \
   $(SDK_ROOT)/components/softdevice/common/nrf_sdh_soc.c \
   $(SDK_ROOT)/components/libraries/util/sdk_mapped_flags.c \
   $(SDK_ROOT)/components/libraries/experimental_section_vars/nrf_section_iter.c \
+  	$(SDK_ROOT)/components/libraries/bsp/bsp.c \
+  $(SDK_ROOT)/components/libraries/bsp/bsp_btn_ble.c \
+  $(SDK_ROOT)/components/libraries/bsp/bsp_nfc.c \
+  $(SDK_ROOT)/components/libraries/fstorage/nrf_fstorage.c \
+  $(SDK_ROOT)/components/libraries/button/app_button.c \
+  $(SDK_ROOT)/components/drivers_nrf/gpiote/nrf_drv_gpiote.c \
 
 #  $(SDK_ROOT)/components/libraries/uart/retarget.c \
 
@@ -262,7 +268,7 @@ OPT = -O0 -g3	# CHANGED to disable optimization (for debugger)
 # C flags common to all targets
 CFLAGS += $(OPT)
 CFLAGS += -DBOARD_PCA10040
-CFLAGS += -DBSP_DEFINES_ONLY	# NOT found in ble_app_uart example
+#CFLAGS += -DBSP_DEFINES_ONLY	# NOT found in ble_app_uart example
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
 CFLAGS += -DNRF52
 CFLAGS += -DNRF52832_XXAA
@@ -291,7 +297,7 @@ ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 ASMFLAGS += -DBOARD_PCA10040
-ASMFLAGS += -DBSP_DEFINES_ONLY	# NOT found in ble_app_uart example
+#ASMFLAGS += -DBSP_DEFINES_ONLY	# NOT found in ble_app_uart example
 ASMFLAGS += -DCONFIG_GPIO_AS_PINRESET
 ASMFLAGS += -DNRF52
 ASMFLAGS += -DNRF52832_XXAA
