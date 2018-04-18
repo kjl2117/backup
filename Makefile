@@ -9,7 +9,8 @@ PROJ_DIR := .
 
 $(OUTPUT_DIRECTORY)/sensen_FW.out: \
 #  LINKER_SCRIPT  := fatfs_gcc_nrf52.ld
-  LINKER_SCRIPT  := ble_app_uart_gcc_nrf52.ld
+#  LINKER_SCRIPT  := ble_app_uart_gcc_nrf52.ld
+  LINKER_SCRIPT  := ble_app_uart_gcc_nrf52_v2.ld
 
 # Source files common to all targets
 SRC_FILES += \
@@ -275,13 +276,14 @@ CFLAGS += -DNRF52832_XXAA
 CFLAGS += -DNRF52_PAN_74
 CFLAGS += -mcpu=cortex-m4
 CFLAGS += -mthumb -mabi=aapcs
-CFLAGS +=  -Wall -Werror
+CFLAGS +=  -Wall -Werror	# Only thing that ASMFLAGS doesn't have
 CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 # Extra flags found in ble_app_uart example
 CFLAGS += -DNRF_SD_BLE_API_VERSION=5
 CFLAGS += -DS132
 CFLAGS += -DSOFTDEVICE_PRESENT
 CFLAGS += -DSWI_DISABLE0
+CFLAGS += -DDEBUG	# Adds Debugging? Not sure about this
 
 # keep every function in a separate section, this allows linker to discard unused ones
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
@@ -307,6 +309,7 @@ ASMFLAGS += -DNRF_SD_BLE_API_VERSION=5
 ASMFLAGS += -DS132
 ASMFLAGS += -DSOFTDEVICE_PRESENT
 ASMFLAGS += -DSWI_DISABLE0
+ASMFLAGS += -DDEBUG	# Adds Debugging? Not sure about this
 
 # Linker flags
 LDFLAGS += $(OPT)

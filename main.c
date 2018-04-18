@@ -123,15 +123,69 @@
 
 /** Overall **/
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
-#define SD_FAIL_SHUTDOWN			0	// If true, will enter infinite loop when SD fails (and wdt will reset)
-#define LOG_INTERVAL				4*1000		// ms between sleep/wake
+#define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
+//#define LOG_INTERVAL				4*1000		// ms between sleep/wake
+#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 #define NUM_SAMPLES_PER_ON_CYCLE	1	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
 #define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
+//#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
 #define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
+
+// The different sensors (used for startup handler)
+typedef enum {
+	DHT,		// DIG
+	GPIO,		// DIG
+	ADP,		// DIG
+	TEMP_NRF,	// REG
+	FIGARO_CO2,	// I2C
+	RTC,		// I2C
+	BME,		// I2C
+	UV_SI1145,	// I2C
+	ADC,		// AIN
+	SHARP,		// AIN
+	SPEC_CO,	// AIN
+	FIGARO_CO,	// AIN
+	BATTERY,	// AIN (no pin needed)
+	FUEL_GAUGE,	// I2C
+	SMALL_PLANTOWER,	// I2C
+	HONEYWELL,			// SERIAL
+	DEEP_SLEEP,
+	SDC,		// SD card, SPIO
+} component_type;
+
+static component_type components_used[] = {
+	ADP,		// DIG
+	SDC,		// SD card, SPIO
+	BATTERY,	// AIN(no pin),	3279
+	FUEL_GAUGE,	// I2C
+	TEMP_NRF,	// REGISTER
+	RTC,		// I2C
+	BME,		// I2C
+////				UV_SI1145,		// I2C
+			SHARP,		// AIN + DIG,	70
+			FIGARO_CO,	// AIN,			1643
+		SMALL_PLANTOWER,	// I2C,	2
+		SPEC_CO,	// AIN,			102
+		FIGARO_CO2,	// I2C,			579
+////			DEEP_SLEEP,
+};
+
+//static component_type twi_sensors[] = {
+//		FIGARO_CO2,
+//		RTC,
+//		BME,
+//		FUEL_GAUGE,
+//		SMALL_PLANTOWER,
+//};
+
+//static component_type *components_used;
+//static int components_used_size;
+static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+
 
 // Counter variables
 static uint32_t loop_num = 0;
@@ -227,6 +281,7 @@ static int dht_humidity = 0;
 // Result = [V(p) - V(n)] * GAIN/REFERENCE * 2^(RESOLUTION); V(n)=0, GAIN=1/6, REFERENCE=0.6V
 // Therefore: V(p) = Result / [GAIN/REFERENCE * 2^(RESOLUTION)]
 static float adc_to_V;	// 0.003515625 == 1.0f / ((ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * pow(2, ADC_RESOLUTION_BITS));
+static int V_to_adc_1000;	// 284.166*1000 == (ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * pow(2, ADC_RESOLUTION_BITS);
 #define PRE_READ_WAIT			5	// ms, wait before an Analog read to let transients settle after switching to high impedance of AIN
 
 /** GPIO Variables **/
@@ -254,7 +309,7 @@ const int fuel_addr = 0x36; // 8bit I2C address, 0x68 for RTC
 static uint16_t fuel_v_cell = 0;	// units: mV
 static uint32_t fuel_percent = 0;	// units: percent*1000
 #define MAX17043_to_mV	1.25
-static bool has_quick_started_fuel_gauge = false;
+//static bool has_quick_started_fuel_gauge = false;
 
 /** UV Sensor SI1145 (TWI) **/
 const int UV_SI1145_addr = 0x60; // 8bit I2C address, 0x68 for RTC
@@ -311,15 +366,22 @@ static int hpm_10_value = 0;
 
 
 /** WATCHDOG TIMER (WDT) **/
-nrf_drv_wdt_channel_id wdt_channel_id;
-#define WDT_TIMEOUT		60*1000 + NUM_SAMPLES_PER_ON_CYCLE*(WAIT_BETWEEN_SAMPLES+1000) + (DHT_STARTUP_WAIT_TIME + PLANTOWER_STARTUP_WAIT_TIME + HPM_STARTUP_WAIT_TIME)	// ms, make it more than DHT and HPM delays
+nrf_drv_wdt_channel_id wdt_meas_channel_id;
+nrf_drv_wdt_channel_id wdt_sleep_channel_id;
+#define WDT_TIMEOUT_MEAS		60*1000 + NUM_SAMPLES_PER_ON_CYCLE*(WAIT_BETWEEN_SAMPLES+1000) + (DHT_STARTUP_WAIT_TIME + PLANTOWER_STARTUP_WAIT_TIME + HPM_STARTUP_WAIT_TIME)	// ms, make it more than DHT and HPM delays
+//#define WDT_TIMEOUT_MEAS		15*1000
+#define WDT_TIMEOUT_SLEEP		LOG_INTERVAL + WDT_TIMEOUT_MEAS
 static int wdt_triggered = 0;
 
 /** APP TIMERS **/
+static int meas_loop_wait_done = 0;
+APP_TIMER_DEF(meas_loop_timer);
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
 //#define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
-static int plantower_startup_wait_done = 0;
+//static int plantower_startup_wait_done = 0;
+static volatile int plantower_startup_wait_done = 0;
+//static volatile bool plantower_startup_wait_done = false;
 APP_TIMER_DEF(plantower_startup_timer);
 //#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
 static int hpm_startup_wait_done = 0;
@@ -353,38 +415,6 @@ APP_TIMER_DEF(hpm_startup_timer);
 
 
 
-// The different sensors (used for startup handler)
-typedef enum {
-	DHT,		// DIG
-	GPIO,		// DIG
-	ADP,		// DIG
-	TEMP_NRF,	// REG
-	FIGARO_CO2,	// I2C
-	RTC,		// I2C
-	BME,		// I2C
-	UV_SI1145,	// I2C
-	ADC,		// AIN
-	SHARP,		// AIN
-	SPEC_CO,	// AIN
-	FIGARO_CO,	// AIN
-	BATTERY,	// AIN (no pin needed)
-	FUEL_GAUGE,	// I2C
-	SMALL_PLANTOWER,	// I2C
-	HONEYWELL,			// SERIAL
-	DEEP_SLEEP,
-	SDC,		// SD card, SPIO
-} component_type;
-
-component_type twi_sensors[] = {
-		FIGARO_CO2,
-		RTC,
-		BME,
-		FUEL_GAUGE,
-		SMALL_PLANTOWER,
-};
-
-//static component_type *components_used;
-static int components_used_size;
 
 /**
  * BLE defines from ble_app_uart
@@ -424,6 +454,9 @@ static ble_uuid_t m_adv_uuids[]          =                                      
 
 //-------------------------------------------------------
 
+
+
+
 /**
  * BLE functions from ble_app_uart
  */
@@ -443,6 +476,7 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
     app_error_handler(DEAD_BEEF, line_num, p_file_name);
 }
+
 
 
 /**@brief Function for the GAP initialization.
@@ -495,6 +529,29 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 
         NRF_LOG_DEBUG("Received data from BLE NUS. Writing data on UART.");
         NRF_LOG_HEXDUMP_DEBUG(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
+
+
+        // FOR TESTING: trying to read a special symbol (ends in '*'), then send to App
+        char flag_send = '*';
+        if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length-1] == flag_send) {
+            NRF_LOG_DEBUG("Detected flag_send: %c, sending data", flag_send);
+
+            // Send some data to App
+            do
+            {
+            	uint8_t data[] = "123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 ";
+                uint16_t length = sizeof(data);
+                err_code = ble_nus_string_send(&m_nus, data, &length);
+                if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_BUSY) )
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            } while (err_code == NRF_ERROR_BUSY);
+
+
+        }
+
+
     }
 
 }
@@ -865,7 +922,8 @@ static void buttons_leds_init(bool * p_erase_bonds)
 {
     bsp_event_t startup_event;
 
-    uint32_t err_code = bsp_init(BSP_INIT_LED | BSP_INIT_BUTTONS, bsp_event_handler);
+//    uint32_t err_code = bsp_init(BSP_INIT_LED | BSP_INIT_BUTTONS, bsp_event_handler);
+    uint32_t err_code = bsp_init(BSP_INIT_BUTTONS, bsp_event_handler);
     APP_ERROR_CHECK(err_code);
 
     err_code = bsp_btn_ble_init(NULL, &startup_event);
@@ -894,7 +952,7 @@ static void power_manage(void)
     APP_ERROR_CHECK(err_code);
 }
 
-//-------------------------------------------------------
+//------------------------------------------------------------------------------------------------------
 
 
 /**
@@ -917,35 +975,66 @@ void wdt_event_handler(void)
     //NOTE: The max amount of time we can spend in WDT interrupt is two cycles of 32768[Hz] clock - after that, reset occurs
 }
 
-// Timeout handler for the single shot timer
-static void dht_startup_handler(void * p_context) {
-	dht_startup_wait_done = 1;
-	NRF_LOG_INFO("dht_startup_wait_done: %d", dht_startup_wait_done);
-}
-static void plantower_startup_handler(void * p_context) {
-	plantower_startup_wait_done = 1;
-	NRF_LOG_INFO("plantower_startup_wait_done: %d", plantower_startup_wait_done);
-}
-static void hpm_startup_handler(void * p_context) {
-	hpm_startup_wait_done = 1;
-	NRF_LOG_INFO("hpm_startup_wait_done: %d", hpm_startup_wait_done);
+
+// Watchdog timer setup
+void wdt_init(void) {
+
+    // Setup Watchdog Timer
+	NRF_LOG_INFO("Start Watchdog Timer...");
+	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
+	NRF_LOG_INFO("WDT_TIMEOUT_SLEEP: %d", WDT_TIMEOUT_SLEEP);
+//	if (!nrf_drv_clock_init_check() ) {
+//		err_code = nrf_drv_clock_init();
+//		NRF_LOG_DEBUG("nrf_drv_clock_init() err_code: %d", err_code);
+//		APP_ERROR_CHECK(err_code);
+//	}
+//    nrf_drv_clock_lfclk_request(NULL);
+//    err_code = app_timer_init();	// CAREFULL, MAYBE DON'T NEED THIS SINCE INIT ALREADY
+//	NRF_LOG_DEBUG("app_timer_init() err_code: %d", err_code);
+//    APP_ERROR_CHECK(err_code);
+
+    // WDT for within a measurement loop
+    // Default values: Pause in SLEEP, Pause in HALT; 2000 ms; IRQ 7
+    nrf_drv_wdt_config_t wdt_meas_config = NRF_DRV_WDT_DEAFULT_CONFIG;
+    wdt_meas_config.reload_value = WDT_TIMEOUT_MEAS;
+    err_code = nrf_drv_wdt_init(&wdt_meas_config, wdt_event_handler);
+//	NRF_LOG_DEBUG("wdt_init() err_code: %d", err_code);
+    APP_ERROR_CHECK(err_code);
+    err_code = nrf_drv_wdt_channel_alloc(&wdt_meas_channel_id);
+//	NRF_LOG_DEBUG("wdt_init() err_code: %d", err_code);
+    APP_ERROR_CHECK(err_code);
+
+//    // WDT for long sleep cycles
+//    // Default values: Pause in SLEEP, Pause in HALT; 2000 ms; IRQ 7
+//    nrf_drv_wdt_config_t wdt_sleep_config = NRF_DRV_WDT_DEAFULT_CONFIG;
+//    wdt_sleep_config.reload_value = WDT_TIMEOUT_SLEEP;
+//    wdt_sleep_config.behaviour = NRF_WDT_BEHAVIOUR_RUN_SLEEP;	// keep it running while waiting
+//    err_code = nrf_drv_wdt_init(&wdt_sleep_config, wdt_event_handler);
+//	NRF_LOG_DEBUG("wdt_init() err_code: %d", err_code);
+//    APP_ERROR_CHECK(err_code);
+//    err_code = nrf_drv_wdt_channel_alloc(&wdt_sleep_channel_id);
+//	NRF_LOG_DEBUG("wdt_init() err_code: %d", err_code);
+//    APP_ERROR_CHECK(err_code);
+
+    nrf_drv_wdt_enable();
+
 }
 
 
 
-///** MACROS needed for app_uart **/
-//// Taken from uart example
-void uart_error_handle(app_uart_evt_t * p_event)
-{
-    if (p_event->evt_type == APP_UART_COMMUNICATION_ERROR)
-    {
-        APP_ERROR_HANDLER(p_event->data.error_communication);
-    }
-    else if (p_event->evt_type == APP_UART_FIFO_ERROR)
-    {
-        APP_ERROR_HANDLER(p_event->data.error_code);
-    }
-}
+/////** MACROS needed for app_uart **/
+////// Taken from uart example
+//void uart_error_handle(app_uart_evt_t * p_event)
+//{
+//    if (p_event->evt_type == APP_UART_COMMUNICATION_ERROR)
+//    {
+//        APP_ERROR_HANDLER(p_event->data.error_communication);
+//    }
+//    else if (p_event->evt_type == APP_UART_FIFO_ERROR)
+//    {
+//        APP_ERROR_HANDLER(p_event->data.error_code);
+//    }
+//}
 
 
 /** MACROS needed for Serial **/
@@ -1175,6 +1264,9 @@ void saadc_init(void)
 {
 	// Calculate adc_to_V (couldn't do this up top since C is dumb)
 	adc_to_V = 1.0f / ((ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1) );
+	V_to_adc_1000 = 1000*(ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1);
+	NRF_LOG_INFO("V_to_adc_1000: %d", V_to_adc_1000);
+//	NRF_LOG_INFO("adc_to_V: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V));
 
 //    ret_code_t err_code;
     err_code = nrf_drv_saadc_init(NULL, saadc_callback);
@@ -1613,30 +1705,30 @@ static ret_code_t read_rtc()
 }
 
 
-// Quick Start Fuel Gauge MAX17043 with TWI (I2C)
-// This lets you pick when the "initial guess" of the internal SOC algorithm takes place
-// Make sure this happens when there aren't initial turn-on fluctuations.
-static ret_code_t fuel_gauge_quick_start() {
-
-	uint8_t regt = 0x06;	// MODE register
-	uint8_t cmd[] = {regt, 0x40, 0x00};	// write 0x4000 to quick start
-
-    nrf_drv_twi_enable(&m_twi);		// for saving power
-
-    // Get battery voltage
-	NRF_LOG_INFO("--Q1");
-    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
-    if (err_code) {	// handle error outside
-    	NRF_LOG_INFO("** WARNING in fuel_gauge_quick_start(), err_code: %d **", err_code);
-    	return err_code;
-    }
-//    APP_ERROR_CHECK(err_code);
-
-    nrf_drv_twi_disable(&m_twi);		// for saving power
-
-    return err_code;
-
-}
+//// Quick Start Fuel Gauge MAX17043 with TWI (I2C)
+//// This lets you pick when the "initial guess" of the internal SOC algorithm takes place
+//// Make sure this happens when there aren't initial turn-on fluctuations.
+//static ret_code_t fuel_gauge_quick_start() {
+//
+//	uint8_t regt = 0x06;	// MODE register
+//	uint8_t cmd[] = {regt, 0x40, 0x00};	// write 0x4000 to quick start
+//
+//    nrf_drv_twi_enable(&m_twi);		// for saving power
+//
+//    // Get battery voltage
+//	NRF_LOG_INFO("--Q1");
+//    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
+//    if (err_code) {	// handle error outside
+//    	NRF_LOG_INFO("** WARNING in fuel_gauge_quick_start(), err_code: %d **", err_code);
+//    	return err_code;
+//    }
+////    APP_ERROR_CHECK(err_code);
+//
+//    nrf_drv_twi_disable(&m_twi);		// for saving power
+//
+//    return err_code;
+//
+//}
 
 
 // Sleep Fuel Gauge MAX17043 with TWI (I2C), for saving power
@@ -1880,25 +1972,32 @@ static ret_code_t read_plantower_twi()
 int32_t get_temp_nrf(void) {
 
     // This function contains workaround for PAN_028 rev2.0A anomalies 28, 29,30 and 31.
-    int32_t volatile temp;
+//    int32_t volatile temp;
+//
+//    nrf_temp_init();
+//
+//	NRF_TEMP->TASKS_START = 1; /** Start the temperature measurement. */
+//
+//	/* Busy wait while temperature measurement is not finished, you can skip waiting if you enable interrupt for DATARDY event and read the result in the interrupt. */
+//	/*lint -e{845} // A zero has been given as right argument to operator '|'" */
+//	while (NRF_TEMP->EVENTS_DATARDY == 0)
+//	{
+//		// Do nothing.
+//	}
+//	NRF_TEMP->EVENTS_DATARDY = 0;
+//
+//	/**@note Workaround for PAN_028 rev2.0A anomaly 29 - TEMP: Stop task clears the TEMP register. */
+//	temp = (nrf_temp_read() / 4);
+//
+//	/**@note Workaround for PAN_028 rev2.0A anomaly 30 - TEMP: Temp module analog front end does not power down when DATARDY event occurs. */
+//	NRF_TEMP->TASKS_STOP = 1; /** Stop the temperature measurement. */
 
-    nrf_temp_init();
 
-	NRF_TEMP->TASKS_START = 1; /** Start the temperature measurement. */
 
-	/* Busy wait while temperature measurement is not finished, you can skip waiting if you enable interrupt for DATARDY event and read the result in the interrupt. */
-	/*lint -e{845} // A zero has been given as right argument to operator '|'" */
-	while (NRF_TEMP->EVENTS_DATARDY == 0)
-	{
-		// Do nothing.
-	}
-	NRF_TEMP->EVENTS_DATARDY = 0;
-
-	/**@note Workaround for PAN_028 rev2.0A anomaly 29 - TEMP: Stop task clears the TEMP register. */
-	temp = (nrf_temp_read() / 4);
-
-	/**@note Workaround for PAN_028 rev2.0A anomaly 30 - TEMP: Temp module analog front end does not power down when DATARDY event occurs. */
-	NRF_TEMP->TASKS_STOP = 1; /** Stop the temperature measurement. */
+    // Can't do above with SoftDevice
+    int32_t temp;
+    err_code = sd_temp_get(&temp);
+    temp = temp*100 / 4;
 
 	return temp;
 }
@@ -1933,11 +2032,13 @@ void sd_init() {
 	NRF_LOG_INFO("Initializing disk 0 (SDC)...");
 	for (uint32_t retries = 3; retries && disk_state; --retries)
 	{
+		NRF_LOG_INFO("--BI");
 		disk_state = disk_initialize(0);
+		NRF_LOG_INFO("--AI");
 	}
 	if (disk_state)
 	{
-		NRF_LOG_INFO("Disk initialization failed.");
+		NRF_LOG_INFO("Disk initialization failed. disk_state: %d", disk_state);
 	}
 
 }
@@ -1959,7 +2060,6 @@ void sd_open() {
     // Open SD
     NRF_LOG_INFO("Writing to file " FILE_NAME "...");
     ff_result = f_open(&file, FILE_NAME, FA_READ | FA_WRITE | FA_OPEN_APPEND);
-    NRF_LOG_INFO("--AFO");
     if (ff_result != FR_OK) {
         NRF_LOG_INFO("Unable to open or create file: " FILE_NAME ".");
     }
@@ -1999,9 +2099,7 @@ void save_data(void) {
 	NRF_LOG_INFO("------------------");
     sd_init();		// TODO: check that this doesn't need to be init with the other init's
     sd_mount();
-    NRF_LOG_INFO("--AM");
     sd_open();
-    NRF_LOG_INFO("--AO");
     // Write to SD
     if (!header_is_written) {
     	sd_write_str(FILE_HEADER);
@@ -2009,9 +2107,10 @@ void save_data(void) {
     }
 
     char out_str[MAX_OUT_STR_SIZE];
-	NRF_LOG_INFO("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
+//	NRF_LOG_INFO("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
 	NRF_LOG_FLUSH();
-    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
     NRF_LOG_INFO("out_str: %s", out_str);
     // Make sure buffer was big enough and didn't spill over
     if (out_str_size > MAX_OUT_STR_SIZE) {
@@ -2040,7 +2139,10 @@ void save_data(void) {
 /**
  * Read all of the sensors
  */
-void get_data(component_type components_used[]) {
+void get_data() {
+
+//NRF_LOG_INFO("--ST");
+//if (0) {
 
 	/** Initialize some stuff **/
 	// Turn on Sample LED
@@ -2053,6 +2155,8 @@ void get_data(component_type components_used[]) {
 	    nrf_gpio_cfg_output(SHARP_PM_LED);
 		nrf_gpio_pin_set(SHARP_PM_LED);
 	}
+//	// ADC setup
+//    saadc_init();
 
 	// DHT sensor
 	if (using_component(DHT, components_used)) {
@@ -2190,7 +2294,7 @@ void get_data(component_type components_used[]) {
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
-			set_rtc(00, 59, 15, 3, 10, 4, 18);	// about 11 seconds of delay
+			set_rtc(00, 57, 18, 6, 13, 4, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -2228,9 +2332,10 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("Sample 1: %d", adc_value);
 
 		// convert to V
-		NRF_LOG_INFO("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
-		NRF_LOG_INFO("adc_value (mV): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V*1000));
-		NRF_LOG_INFO("adc_value (\%): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V/MBED_VREF));
+//		NRF_LOG_INFO("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
+//		NRF_LOG_INFO("adc_value (mV): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V*1000));
+		NRF_LOG_INFO("adc_value (mV): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*1000*1000/V_to_adc_1000));
+//		NRF_LOG_INFO("adc_value (\%): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V/MBED_VREF));
 	//	nrf_drv_saadc_sample();		// Non-blocking function
 	}
 
@@ -2263,7 +2368,7 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("LED turned OFF (high)");
 
 		NRF_LOG_INFO("Sample 1: %d", sharpPM_value);
-		NRF_LOG_INFO("sharpPM_value (mV): %d", sharpPM_value*adc_to_V*1000);
+		NRF_LOG_INFO("sharpPM_value (mV): %d", sharpPM_value*1000*1000/V_to_adc_1000);
 	}
 
 
@@ -2291,9 +2396,11 @@ void get_data(component_type components_used[]) {
 			nrf_delay_ms(SPEC_CO_DELAY);
 		}
 
-		specCO_value = specCO_total/128.0f;
+//		specCO_value = specCO_total/128.0f;
+//		NRF_LOG_INFO("specCO_value: %d", specCO_value);
+		specCO_value = specCO_total/128;
 		NRF_LOG_INFO("specCO_value: %d", specCO_value);
-		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*adc_to_V*1000);
+		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
 	}
 
 
@@ -2309,7 +2416,7 @@ void get_data(component_type components_used[]) {
 
 		NRF_LOG_INFO("Sampling...");
 		nrf_drv_saadc_sample_convert(FIG_CO_CHANNEL_NUM, &figCO_value);
-		NRF_LOG_INFO("figCO_value (mV): %d", figCO_value*adc_to_V*1000);
+		NRF_LOG_INFO("figCO_value (mV): %d", figCO_value*1000*1000/V_to_adc_1000);
 	}
 
 
@@ -2325,10 +2432,25 @@ void get_data(component_type components_used[]) {
 
 		NRF_LOG_INFO("Sampling...");
 		nrf_drv_saadc_sample_convert(BATTERY_CHANNEL_NUM, &battery_value);
-		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
+		NRF_LOG_INFO("V_to_adc_1000: %d", V_to_adc_1000);
+//		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
+		NRF_LOG_INFO("battery_value (mV): %d", battery_value*1000*1000/V_to_adc_1000);
+//		NRF_LOG_INFO("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
+//		adc_to_V = 1.0f / ((ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1) );
+//		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
 	}
 
 	// TODO: Maybe nrf_drv_saadc_uninit() here to save power: "The SAADC is only enabled before sampling and disabled when sampling completes to avoid high current consumption of the EasyDMA"
+//	nrf_drv_saadc_abort();
+//	nrf_drv_saadc_channel_uninit(ADC_CHANNEL_NUM);
+//	nrf_drv_saadc_channel_uninit(SHARP_PM_CHANNEL_NUM);
+//	nrf_drv_saadc_channel_uninit(SPEC_CO_CHANNEL_NUM);
+//	nrf_drv_saadc_channel_uninit(FIG_CO_CHANNEL_NUM);
+//	nrf_drv_saadc_channel_uninit(BATTERY_CHANNEL_NUM);
+//	nrf_drv_saadc_uninit();
+//    NRF_SAADC->INTENCLR = (SAADC_INTENCLR_END_Clear << SAADC_INTENCLR_END_Pos);
+//    NVIC_ClearPendingIRQ(SAADC_IRQn);
+////	NVIC_ClearPendingIRQ(SAADC_IRQn);
 
 
 
@@ -2384,6 +2506,8 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("UV_SI1145_UV_value: %d", UV_SI1145_UV_value);
 	}
 
+//NRF_LOG_INFO("--ST");
+//if (0) {
 
 	// Small Plantower, TWI (I2C)
 	if (using_component(SMALL_PLANTOWER, components_used)) {
@@ -2392,7 +2516,10 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("---------------------------------------");
 		// Wait for sensor to settle from when ADP turned on
 		NRF_LOG_INFO("Waiting for startup wait..");
-		while (!plantower_startup_wait_done) {}
+		while (!plantower_startup_wait_done) {
+//			nrf_delay_ms(1000);
+		}
+		NRF_LOG_INFO("--WAIT DONE");
 
 		err_code = 1;
 		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
@@ -2415,6 +2542,7 @@ void get_data(component_type components_used[]) {
 		NRF_LOG_INFO("plantower_2_5_value = %d", plantower_2_5_value);
 		NRF_LOG_INFO("plantower_10_value = %d", plantower_10_value);
 	}
+//}	// REMOVE
 
 
 	/** Test HPM sensor (Serial comm) **/
@@ -2516,7 +2644,7 @@ void get_data(component_type components_used[]) {
 /**
  * @brief Test function.
  */
-int test_main(component_type components_used[]) {
+int test_main() {
 
 	// Start basic stuff
 	NRF_LOG_INFO("");
@@ -2545,8 +2673,16 @@ int test_main(component_type components_used[]) {
 	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
 	NRF_LOG_INFO("STATUS_LED: HIGH.");
 
+//	nrf_delay_ms(1000);
+
 
 	// Start timer for DHT startup wait (settling time is ~1.5s)
+//	if (!nrf_drv_clock_init_check() ) {
+//		err_code = nrf_drv_clock_init();
+//		NRF_LOG_DEBUG("nrf_drv_clock_init() err_code: %d", err_code);
+//		APP_ERROR_CHECK(err_code);
+//	}
+//	nrf_drv_clock_lfclk_request(NULL);
 	dht_startup_wait_done = 0;
 	if (using_component(DHT, components_used)) {
 		err_code = app_timer_start(dht_startup_timer, APP_TIMER_TICKS(DHT_STARTUP_WAIT_TIME), NULL);
@@ -2562,6 +2698,14 @@ int test_main(component_type components_used[]) {
 		err_code = app_timer_start(hpm_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), NULL);
 		APP_ERROR_CHECK(err_code);
 	}
+//	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LOG_INTERVAL), NULL);
+//	APP_ERROR_CHECK(err_code);
+
+
+//	nrf_delay_ms(1000);
+
+//NRF_LOG_INFO("--ST");
+//if (0) {
 
 
 	// Initialize things before getting data
@@ -2574,14 +2718,16 @@ int test_main(component_type components_used[]) {
 		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
 	    // Quick start once for initial guess
 //		if (!has_quick_started_fuel_gauge) {
-		if (0) {
-			NRF_LOG_INFO("Quick starting fuel gauge..");
-			fuel_gauge_quick_start();
-			has_quick_started_fuel_gauge = true;
-		}
+//		if (0) {
+//			NRF_LOG_INFO("Quick starting fuel gauge..");
+//			fuel_gauge_quick_start();
+//			has_quick_started_fuel_gauge = true;
+//		}
 
 	}
 
+//NRF_LOG_INFO("--ST");
+//if (0) {
 
 	// All the measurements happen here
 	err_cnt = 0;
@@ -2590,12 +2736,16 @@ int test_main(component_type components_used[]) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("-- SAMPLE #%d/%d --", i+1, NUM_SAMPLES_PER_ON_CYCLE);
 
+//NRF_LOG_INFO("--ST");
+//if (0) {
+
 		// Read all of the sensors
-		get_data(components_used);
+		get_data();
 		// Save the data to SD card
 		if (using_component(SDC, components_used)) {
 			save_data();
 		}
+//}	// REMOVE
 
 		// Wait between multiple samples as a buffer time, just in case
 		if (NUM_SAMPLES_PER_ON_CYCLE > 1) {
@@ -2605,6 +2755,7 @@ int test_main(component_type components_used[]) {
 		}
 
 	}
+//}	// REMOVE
 
 
 	// Uninitialize things
@@ -2614,7 +2765,7 @@ int test_main(component_type components_used[]) {
 	// TWI (I2C) UNinit
     nrf_drv_twi_uninit(&m_twi);
 
-
+//}	// REMOVE
 
     // ADP sleep, turn OFF all power
 	if (using_component(ADP, components_used)) {
@@ -2657,7 +2808,8 @@ int test_main(component_type components_used[]) {
 	NRF_LOG_INFO("");
 	NRF_LOG_INFO("Feeding the Watchdog..");
 	NRF_LOG_INFO("----------------------");
-	NRF_LOG_INFO("WDT_TIMEOUT: %d ms", WDT_TIMEOUT);
+	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
+	NRF_LOG_INFO("WDT_TIMEOUT_SLEEP: %d", WDT_TIMEOUT_SLEEP);
 	// check if SD card failed
 	if (sd_write_failed && SD_FAIL_SHUTDOWN) {
 		NRF_LOG_INFO("** FATAL ERROR: sd_write_failed: %d **", sd_write_failed);
@@ -2665,7 +2817,8 @@ int test_main(component_type components_used[]) {
 		// wait until wdt runs out
 		while (1) {}
 	}
-    nrf_drv_wdt_channel_feed(wdt_channel_id);
+//    nrf_drv_wdt_channel_feed(wdt_meas_channel_id);
+	nrf_drv_wdt_feed();	// use this instead for multiple wdt
 
     // Ending stuff
     avoided_error_cnt_total += avoided_error_cnt;
@@ -2685,22 +2838,23 @@ int test_main(component_type components_used[]) {
 /**
  * @brief Runs everything.  Basically the main program
  */
-int test_all(component_type components_used[])
+//int test_all()
+static void test_all()
 {
 
-	// Initial delay so Fuel Gauge starts with good initial guess
-	if (using_component(FUEL_GAUGE, components_used)) {
-		nrf_delay_ms(INITIAL_FUEL_GAUGE_WAIT);
-	}
+//	// Initial delay so Fuel Gauge starts with good initial guess
+//	if (using_component(FUEL_GAUGE, components_used)) {
+//		nrf_delay_ms(INITIAL_FUEL_GAUGE_WAIT);
+//	}
 
 
-    /** Initialize general stuff	**/
-    bsp_board_leds_init();
-	// Turn OFF LED's
-    nrf_gpio_cfg_output(SAMPLE_LED);
-	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
-	nrf_gpio_cfg_output(STATUS_LED);
-	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+//    /** Initialize general stuff	**/
+//    bsp_board_leds_init();
+//	// Turn OFF LED's
+//    nrf_gpio_cfg_output(SAMPLE_LED);
+//	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
+//	nrf_gpio_cfg_output(STATUS_LED);
+//	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
 
 //    // NRF_LOG setup
 //    APP_ERROR_CHECK(NRF_LOG_INIT(NULL));
@@ -2708,64 +2862,67 @@ int test_all(component_type components_used[])
 
 
 
-    // TODO: Check USING_PLANTOWER && USING_HONEYWELL
-	// ADC setup
-    saadc_init();
+//    // TODO: Check USING_PLANTOWER && USING_HONEYWELL
+//	// ADC setup
+//    saadc_init();
 //    // TWI (I2C) init
 //    twi_init();
 //    nrf_delay_ms(1000);
 //    nrf_drv_twi_uninit(&m_twi);
 
 
-    // Startup Message
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("-----------------");
-	NRF_LOG_INFO("| Initial Setup |");
-	NRF_LOG_INFO("-----------------");
+//    // Startup Message
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("-----------------");
+//	NRF_LOG_INFO("| Initial Setup |");
+//	NRF_LOG_INFO("-----------------");
 
 
-    // Setup Watchdog Timer
-	NRF_LOG_INFO("Start Watchdog Timer... WDT_TIMEOUT: %d", WDT_TIMEOUT);
-    err_code = nrf_drv_clock_init();
-    APP_ERROR_CHECK(err_code);
-    nrf_drv_clock_lfclk_request(NULL);
-    err_code = app_timer_init();
-    APP_ERROR_CHECK(err_code);
-    // Default values: Pause in SLEEP, Run in HALT; 2000 ms; IRQ 7
-    nrf_drv_wdt_config_t wdt_config = NRF_DRV_WDT_DEAFULT_CONFIG;
-    wdt_config.reload_value = WDT_TIMEOUT;
-    err_code = nrf_drv_wdt_init(&wdt_config, wdt_event_handler);
-    APP_ERROR_CHECK(err_code);
-    err_code = nrf_drv_wdt_channel_alloc(&wdt_channel_id);
-    APP_ERROR_CHECK(err_code);
-    nrf_drv_wdt_enable();
+//    // Setup Watchdog Timer
+//	NRF_LOG_INFO("Start Watchdog Timer... WDT_TIMEOUT: %d", WDT_TIMEOUT);
+//	if (!nrf_drv_clock_init_check() ) {
+//		err_code = nrf_drv_clock_init();
+//		NRF_LOG_DEBUG("nrf_drv_clock_init() err_code: %d", err_code);
+//		APP_ERROR_CHECK(err_code);
+//	}
+//    nrf_drv_clock_lfclk_request(NULL);
+//    err_code = app_timer_init();	// CAREFULL, MAYBE DON'T NEED THIS SINCE INIT ALREADY
+//	NRF_LOG_DEBUG("app_timer_init() err_code: %d", err_code);
+//    APP_ERROR_CHECK(err_code);
+//    // Default values: Pause in SLEEP, Run in HALT; 2000 ms; IRQ 7
+//    nrf_drv_wdt_config_t wdt_config = NRF_DRV_WDT_DEAFULT_CONFIG;
+//    wdt_config.reload_value = WDT_TIMEOUT;
+//    err_code = nrf_drv_wdt_init(&wdt_config, wdt_event_handler);
+//    APP_ERROR_CHECK(err_code);
+//    err_code = nrf_drv_wdt_channel_alloc(&wdt_meas_channel_id);
+//    APP_ERROR_CHECK(err_code);
+//    nrf_drv_wdt_enable();
 
-    // ADP, turn OFF all power: start with power off when entering loop.
-	NRF_LOG_INFO("Starting with ADP Power OFF... LOW");
-    nrf_gpio_cfg_output(ADP1_PIN);
-	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
-    nrf_gpio_cfg_output(ADP2_PIN);
-	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH
+//    // ADP, turn OFF all power: start with power off when entering loop.
+//	NRF_LOG_INFO("Starting with ADP Power OFF... LOW");
+//    nrf_gpio_cfg_output(ADP1_PIN);
+//	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
+//    nrf_gpio_cfg_output(ADP2_PIN);
+//	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH
 
 
-	// Prepare timer for startup wait (depends on each sensor)
-    err_code = app_timer_create(&dht_startup_timer,
-    							APP_TIMER_MODE_SINGLE_SHOT,
-                                dht_startup_handler);	// sets a flag when timer expires
-    err_code = app_timer_create(&plantower_startup_timer,
-    							APP_TIMER_MODE_SINGLE_SHOT,
-                                plantower_startup_handler);	// sets a flag when timer expires
-    err_code = app_timer_create(&hpm_startup_timer,
-    							APP_TIMER_MODE_SINGLE_SHOT,
-                                hpm_startup_handler);	// sets a flag when timer expires
-//    NRF_LOG_INFO("err_code: %d", err_code);
-    APP_ERROR_CHECK(err_code);
-
+//	// Prepare timer for startup wait (depends on each sensor)
+//    err_code = app_timer_create(&dht_startup_timer,
+//    							APP_TIMER_MODE_SINGLE_SHOT,
+//                                dht_startup_handler);	// sets a flag when timer expires
+//    err_code = app_timer_create(&plantower_startup_timer,
+//    							APP_TIMER_MODE_SINGLE_SHOT,
+//                                plantower_startup_handler);	// sets a flag when timer expires
+//    err_code = app_timer_create(&hpm_startup_timer,
+//    							APP_TIMER_MODE_SINGLE_SHOT,
+//                                hpm_startup_handler);	// sets a flag when timer expires
+////    NRF_LOG_INFO("err_code: %d", err_code);
+//    APP_ERROR_CHECK(err_code);
 
 //    int num_test_main = 3;	// Each loop takes ~ 12s
 //	for (int i=0; i < num_test_main; i++) {
-	while (1) {
-		err_cnt = test_main(components_used);
+//	while (1) {
+		err_cnt = test_main();
 		err_cnt_total += err_cnt;
 
 		NRF_LOG_FLUSH();
@@ -2780,17 +2937,83 @@ int test_all(component_type components_used[])
 		NRF_LOG_INFO("*** test_main() COMPLETE!, next loop_num: %d ***", loop_num);
 		NRF_LOG_FLUSH();
 
-		nrf_delay_ms(LOG_INTERVAL);
-	}
+		meas_loop_wait_done = 0;
 
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("***** ALL LOOPING COMPLETE! *****");
+//		nrf_delay_ms(LOG_INTERVAL);
+//	}
 
-	return NRF_SUCCESS;
+//	NRF_LOG_INFO("");
+//	NRF_LOG_INFO("***** ALL LOOPING COMPLETE! *****");
+
+//	return NRF_SUCCESS;
 
 }
 
 
+//static void test_timer() {
+//	NRF_LOG_INFO("test_timer()");
+//	err_code = app_timer_start(plantower_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), NULL);
+//	APP_ERROR_CHECK(err_code);
+//}
+
+
+// Timeout handlers for startup waits with the single shot timers
+static void meas_loop_handler(void * p_context) {
+	meas_loop_wait_done = 1;
+	NRF_LOG_INFO("meas_loop_wait_done: %d", dht_startup_wait_done);
+//	test_all();
+}
+static void dht_startup_handler(void * p_context) {
+	dht_startup_wait_done = 1;
+	NRF_LOG_INFO("dht_startup_wait_done: %d", dht_startup_wait_done);
+}
+static void plantower_startup_handler(void * p_context) {
+	plantower_startup_wait_done = 1;
+	NRF_LOG_INFO("plantower_startup_wait_done: %d", plantower_startup_wait_done);
+}
+static void hpm_startup_handler(void * p_context) {
+	hpm_startup_wait_done = 1;
+	NRF_LOG_INFO("hpm_startup_wait_done: %d", hpm_startup_wait_done);
+}
+
+
+/**@brief Function for the Timer initialization.
+ *
+ * @details Initializes the timer module. This creates and starts application timers.
+ */
+static void timers_init(void)
+{
+    ret_code_t err_code;
+
+    // Initialize timer module.
+    err_code = app_timer_init();
+    APP_ERROR_CHECK(err_code);
+
+    // Create timer for main code
+    err_code = app_timer_create(&meas_loop_timer,
+								APP_TIMER_MODE_REPEATED,
+//								APP_TIMER_MODE_SINGLE_SHOT,
+//								test_all);
+    //								test_timer);
+    								meas_loop_handler);
+    APP_ERROR_CHECK(err_code);
+
+	// Create timers for startup wait (depends on each sensor)
+    err_code = app_timer_create(&dht_startup_timer,
+    							APP_TIMER_MODE_SINGLE_SHOT,
+                                dht_startup_handler);	// sets a flag when timer expires
+    APP_ERROR_CHECK(err_code);
+    err_code = app_timer_create(&plantower_startup_timer,
+    							APP_TIMER_MODE_SINGLE_SHOT,
+                                plantower_startup_handler);	// sets a flag when timer expires
+    APP_ERROR_CHECK(err_code);
+    err_code = app_timer_create(&hpm_startup_timer,
+    							APP_TIMER_MODE_SINGLE_SHOT,
+                                hpm_startup_handler);	// sets a flag when timer expires
+    APP_ERROR_CHECK(err_code);
+
+
+}
 
 
 /**
@@ -2798,35 +3021,74 @@ int test_all(component_type components_used[])
  */
 int main(void) {
 
-	component_type components_used[] = {
-			ADP,		// DIG
-			SDC,		// SD card, SPIO
-			BATTERY,	// AIN(no pin),	3279
-			FUEL_GAUGE,	// I2C
-			TEMP_NRF,	// REGISTER
-			RTC,		// I2C
-//			UV_SI1145,		// I2C
-			BME,		// I2C
-////			SHARP,		// AIN + DIG,	70
-////			FIGARO_CO,	// AIN,			1643
-			SMALL_PLANTOWER,	// I2C,	2
-			SPEC_CO,	// AIN,			102
-//			FIGARO_CO2,	// I2C,			579
-////			DEEP_SLEEP,
-	};
-	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+//	component_type components_used[] = {
+//			ADP,		// DIG
+//			SDC,		// SD card, SPIO
+//			BATTERY,	// AIN(no pin),	3279
+//			FUEL_GAUGE,	// I2C
+//			TEMP_NRF,	// REGISTER
+//			RTC,		// I2C
+////			UV_SI1145,		// I2C
+//			BME,		// I2C
+//////			SHARP,		// AIN + DIG,	70
+//////			FIGARO_CO,	// AIN,			1643
+//			SMALL_PLANTOWER,	// I2C,	2
+////			SPEC_CO,	// AIN,			102
+////			FIGARO_CO2,	// I2C,			579
+//////			DEEP_SLEEP,
+//	};
+//	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 
 
-	// BLE Stuff
-    bool     erase_bonds;
 
-    // Initialize.
-    err_code = app_timer_init();
-    APP_ERROR_CHECK(err_code);
 
-//    uart_init();
+
+
+//	// BLE Stuff
+//    bool     erase_bonds;
+//
+//    // Initialize.
+////    err_code = app_timer_init();
+////    APP_ERROR_CHECK(err_code);
+//    timers_init();
+//
+////    uart_init();
+//    log_init();
+
+
+	// Initial delay so Fuel Gauge starts with good initial guess
+	// NOTE: MAYBE MOVE THIS SOMEWHERE ELSE, if LEDs or ADPs are drawing power on powerup
+	if (using_component(FUEL_GAUGE, components_used)) {
+		nrf_delay_ms(INITIAL_FUEL_GAUGE_WAIT);
+	}
+
+    // Startup Message
     log_init();
+	NRF_LOG_INFO("");
+	NRF_LOG_INFO("-----------------");
+	NRF_LOG_INFO("| Initial Setup |");
+	NRF_LOG_INFO("-----------------");
 
+
+	// Setup general stuff for the board
+    bsp_board_leds_init();
+	// Turn OFF LED's
+    nrf_gpio_cfg_output(SAMPLE_LED);
+	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
+	nrf_gpio_cfg_output(STATUS_LED);
+	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+    // ADP, turn OFF all power: start with power off when entering loop.
+	NRF_LOG_INFO("Starting with ADP Power OFF... LOW");
+    nrf_gpio_cfg_output(ADP1_PIN);
+	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
+    nrf_gpio_cfg_output(ADP2_PIN);
+	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH
+//	// ADC setup
+    saadc_init();
+
+	// BLE
+    bool erase_bonds;
+    timers_init();
     buttons_leds_init(&erase_bonds);
     ble_stack_init();
     gap_params_init();
@@ -2835,22 +3097,58 @@ int main(void) {
     advertising_init();
     conn_params_init();
 
-    printf("\r\nUART Start! (printf)\r\n");
-    NRF_LOG_INFO("UART Start!");
-    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
-    APP_ERROR_CHECK(err_code);
+    // Watchdog Timer
+    wdt_init();
+//    wdt_init();
+
+
+
+	// Main section that uses sensors
+//	err_code = test_all(components_used);
+//	err_code = test_all();
+
+
+
+
+
+
+////    printf("\r\nUART Start! (printf)\r\n");
+//    NRF_LOG_INFO("UART Start!");
+//    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
+////    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_SLOW);	// Unknown error
+//    APP_ERROR_CHECK(err_code);
+
+    // Start timer for main measurement loop
+	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LOG_INTERVAL), NULL);
+	APP_ERROR_CHECK(err_code);
+	test_all();
+//	if (0) test_all();
+
+//	nrf_delay_ms(5*1000);
+//	test_all();
+//	nrf_delay_ms(5*1000);
+//	test_all();
+//	nrf_delay_ms(5*1000);
+//	test_all();
+
 
     // Enter main loop.
     for (;;)
     {
         UNUSED_RETURN_VALUE(NRF_LOG_PROCESS());
         power_manage();
+        if (meas_loop_wait_done) {
+        	test_all();
+        }
     }
 
 
 
-	// Main section that uses sensors
-	err_code = test_all(components_used);
+
+
+
+//	// Main section that uses sensors
+//	err_code = test_all(components_used);
 
 
 }

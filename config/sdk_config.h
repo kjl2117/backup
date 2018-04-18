@@ -1534,7 +1534,9 @@
 // <3=> NRF_GPIO_PIN_PULLUP 
 
 #ifndef NRF_SPI_DRV_MISO_PULLUP_CFG
-#define NRF_SPI_DRV_MISO_PULLUP_CFG 1
+//#define NRF_SPI_DRV_MISO_PULLUP_CFG 1		// Doesn't work with all SD cards
+//#define NRF_SPI_DRV_MISO_PULLUP_CFG 3		// 80uA w/o SD, ~300uA w/ SD, disk_initialize(0) hangs with app_timer
+#define NRF_SPI_DRV_MISO_PULLUP_CFG 0		// 35uA w/ SD, disk_initialize(0) hangs with app_timer
 #endif
 
 // <e> SPI0_ENABLED - Enable SPI0 instance
@@ -3239,8 +3241,8 @@
 // <i> Log data is buffered and can be processed in idle.
 
 #ifndef NRF_LOG_DEFERRED
-#define NRF_LOG_DEFERRED 1
-//#define NRF_LOG_DEFERRED 0
+//#define NRF_LOG_DEFERRED 1
+#define NRF_LOG_DEFERRED 0
 #endif
 
 // <o> NRF_LOG_BUFSIZE  - Size of the buffer for storing logs (in bytes).
