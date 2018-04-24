@@ -124,15 +124,16 @@
 /** Overall **/
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
-//#define LOG_INTERVAL				4*1000		// ms between sleep/wake
+#define USING_CUSTOM_LIPO			0	// If true, will modify fuel gauge calculation, since it's not spec'ed for our special battery
 #define LOG_INTERVAL				10*1000		// ms between sleep/wake
+//#define LOG_INTERVAL				10*1000		// ms between sleep/wake
+#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
+//#define PLANTOWER_STARTUP_WAIT_TIME		1*1000	//ms
 #define NUM_SAMPLES_PER_ON_CYCLE	1	// 20
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
 #define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
-//#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
-#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 
 // The different sensors (used for startup handler)
@@ -158,7 +159,7 @@ typedef enum {
 } component_type;
 
 static component_type components_used[] = {
-	ADP,		// DIG
+//	ADP,		// DIG
 	SDC,		// SD card, SPIO
 	BATTERY,	// AIN(no pin),	3279
 	FUEL_GAUGE,	// I2C
@@ -206,8 +207,9 @@ static ret_code_t err_code;
 /** SD Card Variables.  From example: peripheral/fatfs **/
 #define FILE_NAME   "test.TXT"
 #define MAX_OUT_STR_SIZE	200
-#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
-#define SD_SYSTEM_RESET_WAIT	2000	//ms
+#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+#define SDC_BUFF_SIZE		200
+
 static FATFS fs;
 static FIL file;
 FRESULT ff_result;
@@ -308,6 +310,12 @@ static nrf_saadc_value_t battery_value;
 const int fuel_addr = 0x36; // 8bit I2C address, 0x68 for RTC
 static uint16_t fuel_v_cell = 0;	// units: mV
 static uint32_t fuel_percent = 0;	// units: percent*1000
+static uint32_t fuel_percent_raw = 0;	// units: percent*1000
+#define FUEL_SCALE_FACTOR		2.589	// Factor of how much time expansion
+#define FUEL_PERCENT_THRESHOLD	20	// Start extrapolating after this threshold (%)
+static uint32_t runtime_estimate = 0;	// units: percent*1000
+static uint32_t fuel_p0 = 0;	// units: percent*1000
+static uint32_t fuel_t0 = 0;	// units: percent*1000
 #define MAX17043_to_mV	1.25
 //static bool has_quick_started_fuel_gauge = false;
 
@@ -428,8 +436,12 @@ APP_TIMER_DEF(hpm_startup_timer);
 
 #define APP_BLE_OBSERVER_PRIO           3                                           /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 
-#define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
-#define APP_ADV_TIMEOUT_IN_SECONDS      180                                         /**< The advertising timeout (in units of seconds). */
+//#define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
+//#define APP_ADV_INTERVAL                480                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
+#define APP_ADV_INTERVAL                MSEC_TO_UNITS(1000, UNIT_0_625_MS)                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
+//#define APP_ADV_TIMEOUT_IN_SECONDS      180                                         /**< The advertising timeout (in units of seconds). */
+//#define APP_ADV_TIMEOUT_IN_SECONDS      500                                         /**< The advertising timeout (in units of seconds). */
+#define APP_ADV_TIMEOUT_IN_SECONDS      0                                         /**< The advertising timeout (in units of seconds). */
 
 #define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
 #define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
@@ -636,6 +648,9 @@ static void conn_params_init(void)
  */
 static void sleep_mode_enter(void)
 {
+	// SHOULD ONLY BE HERE IF ADVERTISING TURNED OFF
+    NRF_LOG_INFO("** WARNING: In sleep_mode_enter(). SHOULD NOT BE HERE");
+
     uint32_t err_code = bsp_indication_set(BSP_INDICATE_IDLE);
     APP_ERROR_CHECK(err_code);
 
@@ -661,10 +676,14 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
 
     switch (ble_adv_evt)
     {
-        case BLE_ADV_EVT_FAST:
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
-            APP_ERROR_CHECK(err_code);
-            break;
+		case BLE_ADV_EVT_FAST:
+			err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
+			APP_ERROR_CHECK(err_code);
+			break;
+		case BLE_ADV_EVT_SLOW:
+			err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
+			APP_ERROR_CHECK(err_code);
+			break;
         case BLE_ADV_EVT_IDLE:
             sleep_mode_enter();
             break;
@@ -896,14 +915,20 @@ static void advertising_init(void)
 
     init.advdata.name_type          = BLE_ADVDATA_FULL_NAME;
     init.advdata.include_appearance = false;
-    init.advdata.flags              = BLE_GAP_ADV_FLAGS_LE_ONLY_LIMITED_DISC_MODE;
+//    init.advdata.flags              = BLE_GAP_ADV_FLAGS_LE_ONLY_LIMITED_DISC_MODE;
+    init.advdata.flags              = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;	// needed to disable timeout
 
     init.srdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
     init.srdata.uuids_complete.p_uuids  = m_adv_uuids;
 
     init.config.ble_adv_fast_enabled  = true;
     init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
+//    NRF_LOG_INFO("APP_ADV_INTERVAL: %d", APP_ADV_INTERVAL);
     init.config.ble_adv_fast_timeout  = APP_ADV_TIMEOUT_IN_SECONDS;
+
+//    init.config.ble_adv_slow_enabled  = true;
+//    init.config.ble_adv_slow_interval = APP_ADV_INTERVAL;
+//    init.config.ble_adv_slow_timeout  = APP_ADV_TIMEOUT_IN_SECONDS;
 
     init.evt_handler = on_adv_evt;
 
@@ -923,7 +948,8 @@ static void buttons_leds_init(bool * p_erase_bonds)
     bsp_event_t startup_event;
 
 //    uint32_t err_code = bsp_init(BSP_INIT_LED | BSP_INIT_BUTTONS, bsp_event_handler);
-    uint32_t err_code = bsp_init(BSP_INIT_BUTTONS, bsp_event_handler);
+//    uint32_t err_code = bsp_init(BSP_INIT_BUTTONS, bsp_event_handler);
+    uint32_t err_code = bsp_init(0, bsp_event_handler);
     APP_ERROR_CHECK(err_code);
 
     err_code = bsp_btn_ble_init(NULL, &startup_event);
@@ -948,7 +974,10 @@ static void log_init(void)
  */
 static void power_manage(void)
 {
-    uint32_t err_code = sd_app_evt_wait();
+    err_code = sd_app_evt_wait();
+    if (err_code) {
+        NRF_LOG_INFO("power_manage(), err_code: %d", err_code);
+    }
     APP_ERROR_CHECK(err_code);
 }
 
@@ -1810,20 +1839,67 @@ static ret_code_t read_fuel_gauge() {
 	err_code = nrf_drv_twi_rx(&m_twi, fuel_addr, cmd, 2);
     APP_ERROR_CHECK(err_code);
     // Convert and save
-    fuel_percent = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
+    fuel_percent_raw = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
 	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
 	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
-//	NRF_LOG_INFO("fuel_percent = %d", fuel_percent);
-    fuel_percent = fuel_percent/256.0 * 1000;	// convert to float, but leave 3 decimal places
-////    fuel_percent = fuel_percent * (1000.0/256.0);	// convert to float, but leave 3 decimal places
-//	NRF_LOG_INFO("fuel_percent = %d", fuel_percent);
+//	NRF_LOG_INFO("fuel_percent_raw = %d", fuel_percent_raw);
+	fuel_percent_raw = fuel_percent_raw/256.0 * 1000;	// convert to float, but leave 3 decimal places
+////    fuel_percent_raw = fuel_percent_raw * (1000.0/256.0);	// convert to float, but leave 3 decimal places
+//	NRF_LOG_INFO("fuel_percent_raw = %d", fuel_percent_raw);
 //	NRF_LOG_INFO("cmd[0]*1000 + cmd[1]*(1000.0/256.0) = %d", cmd[0]*1000 + cmd[1]*(1000.0/256.0) );
-//	fuel_percent = cmd[0]*1000 + cmd[1]*(1000.0/256.0);	// Need *1000 for 3 decimal places, /256 to get fractional part
+//	fuel_percent_raw = cmd[0]*1000 + cmd[1]*(1000.0/256.0);	// Need *1000 for 3 decimal places, /256 to get fractional part
 
 
     nrf_drv_twi_disable(&m_twi);		// for saving power
 
     return err_code;
+
+}
+
+
+// Adjust or Extrapolate battery fuel percentage for our custom batteries
+static void calc_fuel_percent() {
+
+	if (USING_CUSTOM_LIPO) {
+		// Store initial values for later
+		if (fuel_t0 == 0) {
+			fuel_t0 = timeNow;
+			fuel_p0 = fuel_percent_raw;
+		}
+
+
+//		// FOR TESTING
+//		if (loop_num > 0) fuel_percent_raw = 80*1000;
+//		if (loop_num > 1) fuel_percent_raw = 60*1000;
+//		if (loop_num > 2) fuel_percent_raw = 40*1000;
+//		if (loop_num > 3) fuel_percent_raw = 10*1000;
+//		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
+
+
+
+		// If above the threshold, adjust the measured value differently
+		if (fuel_percent_raw > FUEL_PERCENT_THRESHOLD*1000) {
+			// Simple attempt: weighted averages of current and initial
+			fuel_percent = fuel_percent_raw/FUEL_SCALE_FACTOR + (FUEL_SCALE_FACTOR-1)*fuel_p0/FUEL_SCALE_FACTOR;
+	//	} else {	// More complicated: extrapolate along a line: (y-y0)=m(x-x0), m=(yL-y0)/(xL-x0), xL=ath*xth
+		} else {	// More complicated: Estimate total runtime and take percentage of that
+			if (runtime_estimate == 0) {	// estimate runtime only the first time it falls below threshold
+				runtime_estimate = (timeNow - fuel_t0) * FUEL_SCALE_FACTOR;
+			}
+
+//			NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
+
+			if ((timeNow - fuel_t0) > runtime_estimate) {	// set to 0 if already past runtime_estimate
+				fuel_percent = 0;
+			} else {
+				fuel_percent = 1000 * 100*(fuel_t0 + runtime_estimate - timeNow) / runtime_estimate;	// 100x b/c %, 1000x for 3 decimal places
+			}
+		}
+	// No need to modify calculation for standard LiPo battery
+	} else {
+		fuel_percent = fuel_percent_raw;
+	}
+
 
 }
 
@@ -2077,7 +2153,6 @@ void sd_write_str(const void* buff) {
 		// Reset the system if it's not working properly
 		sd_write_failed = true;
 		err_cnt++;
-//		nrf_delay_ms(SD_SYSTEM_RESET_WAIT);
 //		NVIC_SystemReset();
 
 	}
@@ -2110,7 +2185,7 @@ void save_data(void) {
 //	NRF_LOG_INFO("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
 	NRF_LOG_FLUSH();
 //    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
     NRF_LOG_INFO("out_str: %s", out_str);
     // Make sure buffer was big enough and didn't spill over
     if (out_str_size > MAX_OUT_STR_SIZE) {
@@ -2479,13 +2554,18 @@ void get_data() {
 			NRF_LOG_INFO("** ERROR: Fuel Gauge read, err_code=%d **", err_code);
 			fuel_v_cell = 0;
 			fuel_percent = 0;
+			fuel_percent_raw = 0;
 			err_cnt++;
 			fuel_gauge_error_cnt_total++;
+		} else {	// calculate % from raw value (maybe extrapolate)
+			calc_fuel_percent();
 		}
 
 		// Read Fuel
 		NRF_LOG_INFO("fuel_v_cell: %d", fuel_v_cell);
+		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
 		NRF_LOG_INFO("fuel_percent: %d", fuel_percent);
+		NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
 	}
 
 
@@ -2712,7 +2792,9 @@ int test_main() {
 	// Initial delay so things can settle
 	nrf_delay_ms(INITIAL_SETTLING_WAIT);
     // TWI (I2C) init
+//	NRF_LOG_INFO("--BTWI");
     twi_init();
+//	NRF_LOG_INFO("--ATWI");
     // Init Fuel Gauge
 	if (using_component(FUEL_GAUGE, components_used)) {
 		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
@@ -3112,11 +3194,11 @@ int main(void) {
 
 
 
-////    printf("\r\nUART Start! (printf)\r\n");
-//    NRF_LOG_INFO("UART Start!");
-//    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
-////    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_SLOW);	// Unknown error
-//    APP_ERROR_CHECK(err_code);
+//    printf("\r\nUART Start! (printf)\r\n");
+    NRF_LOG_INFO("UART Start!");
+    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
+//    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_SLOW);	// Unknown error
+    APP_ERROR_CHECK(err_code);
 
     // Start timer for main measurement loop
 	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LOG_INTERVAL), NULL);

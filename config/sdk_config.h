@@ -1535,8 +1535,8 @@
 
 #ifndef NRF_SPI_DRV_MISO_PULLUP_CFG
 //#define NRF_SPI_DRV_MISO_PULLUP_CFG 1		// Doesn't work with all SD cards
-//#define NRF_SPI_DRV_MISO_PULLUP_CFG 3		// 80uA w/o SD, ~300uA w/ SD, disk_initialize(0) hangs with app_timer
-#define NRF_SPI_DRV_MISO_PULLUP_CFG 0		// 35uA w/ SD, disk_initialize(0) hangs with app_timer
+//#define NRF_SPI_DRV_MISO_PULLUP_CFG 3		// 80uA w/o SD, ~300uA w/ SD
+#define NRF_SPI_DRV_MISO_PULLUP_CFG 0		// 35uA w/ SD
 #endif
 
 // <e> SPI0_ENABLED - Enable SPI0 instance
@@ -1900,6 +1900,7 @@
 //==========================================================
 #ifndef UART_ENABLED
 #define UART_ENABLED 1
+//#define UART_ENABLED 0
 #endif
 // <o> UART_DEFAULT_CONFIG_HWFC  - Hardware Flow Control
  
@@ -1977,6 +1978,7 @@
 //==========================================================
 #ifndef UART0_ENABLED
 #define UART0_ENABLED 1
+//#define UART0_ENABLED 0
 #endif
 // <q> UART0_CONFIG_USE_EASY_DMA  - Default setting for using EasyDMA
  
@@ -3166,6 +3168,7 @@
 //==========================================================
 #ifndef NRF_LOG_ENABLED
 #define NRF_LOG_ENABLED 1
+//#define NRF_LOG_ENABLED 0
 #endif
 // <e> NRF_LOG_USES_COLORS - If enabled then ANSI escape code for colors is prefixed to every string
 //==========================================================
