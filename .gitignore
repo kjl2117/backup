@@ -6,3 +6,5 @@ _build/
 Eclipse gcc notes.txt
 Converting C to CPP.txt
 git commands.txt
+ble_app_hrs_gcc_nrf52.ld
+ble_app_uart_gcc_nrf52_v2.ld
