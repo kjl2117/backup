@@ -115,6 +115,9 @@
 //#include "nrf_log.h"
 //#include "nrf_log_ctrl.h"
 //#include "nrf_log_default_backends.h"
+#define SUM		0
+#define HAP		1
+#define CUSTOM	2
 
 
 
@@ -122,13 +125,14 @@
 //--------------------//
 
 /** Overall **/
+#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 #define LOG_INTERVAL				10*1000		// ms between sleep/wake
-#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//ms	~2.5s is min
+#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms	~2.5s is min
 //#define PLANTOWER_STARTUP_WAIT_TIME		1*1000	//ms
-#define SPEC_CO_STARTUP_WAIT_TIME		5*1000	//ms
+#define SPEC_CO_STARTUP_WAIT_TIME		6*1000	//ms
 #define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
@@ -141,7 +145,8 @@
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 
-// The different sensors (used for startup handler)
+
+// The different sensors (used for choosing which sensor code to run)
 typedef enum {
 	DHT,		// DIG
 	GPIO,		// DIG
@@ -164,42 +169,61 @@ typedef enum {
 	SDC,		// SD card, SPIO
 } component_type;
 
-static component_type components_used[] = {
-	ADP,		// DIG
-	ADP_HIGH,	// DIG, for switching only High Power sensors
-	SDC,		// SD card, SPIO
-	BATTERY,	// AIN(no pin),	3279
-	FUEL_GAUGE,	// I2C
-	TEMP_NRF,	// REGISTER
-	RTC,		// I2C
-	BME,		// I2C
-////				UV_SI1145,		// I2C
-			SHARP,		// AIN + DIG,	70
-			FIGARO_CO,	// AIN,			1643
-		SMALL_PLANTOWER,	// I2C,	2
-		SPEC_CO,	// AIN,			102
-		FIGARO_CO2,	// I2C,			579
-////			DEEP_SLEEP,
-};
-
-//static component_type twi_sensors[] = {
-//		FIGARO_CO2,
-//		RTC,
-//		BME,
-//		FUEL_GAUGE,
-//		SMALL_PLANTOWER,
-//};
-
-//static component_type *components_used;
-//static int components_used_size;
-static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-
 typedef enum {
 	BAT_LIPO_1200mAh,
 	BAT_LIPO_2000mAh,
 	BAT_LIPO_10Ah,
 } battery_type;
-static battery_type battery_type_used = BAT_LIPO_1200mAh;
+//static battery_type battery_type_used = BAT_LIPO_1200mAh;
+
+#if PRODUCT_TYPE == SUM
+	static component_type components_used[] = {
+		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
+		SDC,		// SD card, SPIO
+		BATTERY,	// AIN(no pin),	3279
+		FUEL_GAUGE,	// I2C
+		TEMP_NRF,	// REGISTER
+		RTC,		// I2C
+	//////				UV_SI1145,		// I2C
+	};
+	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+#elif PRODUCT_TYPE == HAP
+	static component_type components_used[] = {
+		ADP,		// DIG
+		ADP_HIGH,	// DIG, for switching only High Power sensors
+		SDC,		// SD card, SPIO
+		BATTERY,	// AIN(no pin),	3279
+		FUEL_GAUGE,	// I2C
+		TEMP_NRF,	// REGISTER
+		RTC,		// I2C
+			BME,		// I2C
+			SMALL_PLANTOWER,	// I2C,	2
+			SPEC_CO,	// AIN,			102
+			FIGARO_CO2,	// I2C,			579
+	};
+	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+	static battery_type battery_type_used = BAT_LIPO_10Ah;
+#else
+	static component_type components_used[] = {
+//		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
+		SDC,		// SD card, SPIO
+		BATTERY,	// AIN(no pin),	3279
+		FUEL_GAUGE,	// I2C
+		TEMP_NRF,	// REGISTER
+		RTC,		// I2C
+	//////				UV_SI1145,		// I2C
+			BME,		// I2C
+			SMALL_PLANTOWER,	// I2C,	2
+	//		SPEC_CO,	// AIN,			102
+	//		FIGARO_CO2,	// I2C,			579
+	//////			DEEP_SLEEP,
+	};
+	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+	static battery_type battery_type_used = BAT_LIPO_2000mAh;
+#endif
 
 // NOTE: This MUST correspond to battery_type above!
 static float battery_scale_factors[] = {
@@ -345,13 +369,20 @@ static nrf_saadc_value_t figCO_value;
 static nrf_saadc_value_t battery_value;
 
 /** Fuel Gauge Check Variables (TWI) **/
-const int fuel_addr = 0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+#if PRODUCT_TYPE == SUM
+	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+#elif PRODUCT_TYPE == HAP
+	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+#else
+//	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+#endif
 static uint16_t fuel_v_cell = 0;	// units: mV
 static uint32_t fuel_percent = 0;	// units: percent*1000
 static uint32_t fuel_percent_raw = 0;	// units: percent*1000
 //#define FUEL_SCALE_FACTOR		2.589	// Factor of how much time expansion
 //#define FLOAT_FACTOR			1000
-#define FUEL_PERCENT_THRESHOLD	20	// Start extrapolating after this threshold (%)
+#define FUEL_PERCENT_THRESHOLD	0.300	//20	// Start extrapolating after this threshold (%)
 static uint32_t runtime_estimate = 0;	// units: percent*1000
 static uint32_t fuel_p0 = 0;	// units: percent*1000
 static uint32_t fuel_t0 = 0;	// units: percent*1000
@@ -540,6 +571,7 @@ void HardFault_Handler(void)
 
 //    printf("Hard Fault at address: 0x%08x\r\n", (unsigned int)ia);
     NRF_LOG_INFO("Hard Fault at address: 0x%08x\r\n", (unsigned int)ia);
+    NRF_LOG_FLUSH();
     while(1)
         ;
 }
@@ -2839,7 +2871,7 @@ void get_data() {
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
-			set_rtc(00, 34, 18, 5, 3, 5, 18);	// about 11 seconds of delay
+			set_rtc(00, 57, 13, 4, 9, 5, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -3009,6 +3041,7 @@ void get_data() {
 		}
 
 		// Read Fuel
+		NRF_LOG_INFO("battery_scale_factor*1000: %d", battery_scale_factors[battery_type_used]*1000);
 		NRF_LOG_INFO("fuel_v_cell: %d", fuel_v_cell);
 		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
 		NRF_LOG_INFO("fuel_percent: %d", fuel_percent);
@@ -3676,6 +3709,16 @@ int main(void) {
 	NRF_LOG_INFO("-----------------");
 	NRF_LOG_INFO("| Initial Setup |");
 	NRF_LOG_INFO("-----------------");
+    // Show which product we are using
+	if (PRODUCT_TYPE == SUM) {
+	    NRF_LOG_INFO("PRODUCT_TYPE: SUM");
+	} else if (PRODUCT_TYPE == HAP) {
+	    NRF_LOG_INFO("PRODUCT_TYPE: HAP");
+	} else if (PRODUCT_TYPE == CUSTOM) {
+	    NRF_LOG_INFO("PRODUCT_TYPE: CUSTOM");
+	} else {
+		NRF_LOG_INFO("** WARNING: PRODUCT_TYPE: UNKNOWN");
+	}
 
 
 	// Setup general stuff for the board
@@ -3708,6 +3751,8 @@ int main(void) {
     // Watchdog Timer
     wdt_init();
 //    wdt_init();
+
+
 
 
 
