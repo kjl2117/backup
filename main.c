@@ -125,7 +125,7 @@
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, CUSTOM,
+#define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
@@ -222,7 +222,7 @@ typedef enum {
 	//////			DEEP_SLEEP,
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-	static battery_type battery_type_used = BAT_LIPO_2000mAh;
+	static battery_type battery_type_used = BAT_LIPO_1200mAh;
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
@@ -256,7 +256,13 @@ static ret_code_t err_code;
 ////#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
 #define MAX_OUT_STR_SIZE	200
-#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+#if PRODUCT_TYPE == SUM
+	#define FILE_HEADER	"Time, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+#elif PRODUCT_TYPE == HAP
+	#define FILE_HEADER	"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+#else
+	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+#endif
 #define SDC_BUFF_SIZE		1000	//100
 static uint8_t sdc_buff[SDC_BUFF_SIZE];	// = {0};
 static uint16_t sdc_buff_current_pos = 0;
@@ -382,7 +388,7 @@ static uint32_t fuel_percent = 0;	// units: percent*1000
 static uint32_t fuel_percent_raw = 0;	// units: percent*1000
 //#define FUEL_SCALE_FACTOR		2.589	// Factor of how much time expansion
 //#define FLOAT_FACTOR			1000
-#define FUEL_PERCENT_THRESHOLD	0.300	//20	// Start extrapolating after this threshold (%)
+#define FUEL_PERCENT_THRESHOLD	1.200	//20	// Start extrapolating after this threshold (%)
 static uint32_t runtime_estimate = 0;	// units: percent*1000
 static uint32_t fuel_p0 = 0;	// units: percent*1000
 static uint32_t fuel_t0 = 0;	// units: percent*1000
@@ -791,8 +797,17 @@ void save_data(void) {
 	NRF_LOG_FLUSH();
 //    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 //    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-    int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-    NRF_LOG_INFO("out_str: %s", out_str);
+
+	// Save different strings depending on the device
+	#if PRODUCT_TYPE == SUM
+		int out_str_size = sprintf(out_str, "%ld,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",timeNow, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
+	#elif PRODUCT_TYPE == HAP
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",timeNow, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
+	#else
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",timeNow,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+	#endif
+
+	NRF_LOG_INFO("out_str: %s", out_str);
     // Make sure buffer was big enough and didn't spill over
     if (out_str_size > MAX_OUT_STR_SIZE) {
     	NRF_LOG_INFO("** ERROR: out_str too big!, out_str_size=%d", out_str_size);
@@ -2479,6 +2494,8 @@ static void calc_fuel_percent() {
 
 
 		// If above the threshold, adjust the measured value differently
+		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
+		NRF_LOG_INFO("FUEL_PERCENT_THRESHOLD*1000: %d", FUEL_PERCENT_THRESHOLD*1000);
 		if (fuel_percent_raw > FUEL_PERCENT_THRESHOLD*1000) {
 			// Simple attempt: weighted averages of current and initial
 			fuel_percent = fuel_percent_raw/battery_scale_factor + (battery_scale_factor-1)*fuel_p0/battery_scale_factor;
@@ -2490,17 +2507,24 @@ static void calc_fuel_percent() {
 			}
 
 			NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
+			NRF_LOG_INFO("timeNow: %d", timeNow);
+			NRF_LOG_INFO("t0: %d", t0);
+			NRF_LOG_INFO("fuel_t0: %d", fuel_t0);
+			NRF_LOG_INFO("(runtime_estimate - (timeNow - fuel_t0)): %d", (runtime_estimate - (timeNow - fuel_t0)));
+			NRF_LOG_INFO("100*(runtime_estimate - (timeNow - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (timeNow - fuel_t0)) / runtime_estimate);
+			NRF_LOG_INFO("(runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate)));
+
 			if ((timeNow - fuel_t0) > runtime_estimate) {	// set to 0 if already past runtime_estimate
 				fuel_percent = 0;
 				NRF_LOG_INFO("set fuel_percent to 0");
 			} else {
-				NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
-				NRF_LOG_INFO("timeNow: %d", timeNow);
-				NRF_LOG_INFO("t0: %d", t0);
-				NRF_LOG_INFO("fuel_t0: %d", fuel_t0);
-				NRF_LOG_INFO("(runtime_estimate - (timeNow - fuel_t0)): %d", (runtime_estimate - (timeNow - fuel_t0)));
-				NRF_LOG_INFO("100*(runtime_estimate - (timeNow - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (timeNow - fuel_t0)) / runtime_estimate);
-				NRF_LOG_INFO("(runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate)));
+//				NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
+//				NRF_LOG_INFO("timeNow: %d", timeNow);
+//				NRF_LOG_INFO("t0: %d", t0);
+//				NRF_LOG_INFO("fuel_t0: %d", fuel_t0);
+//				NRF_LOG_INFO("(runtime_estimate - (timeNow - fuel_t0)): %d", (runtime_estimate - (timeNow - fuel_t0)));
+//				NRF_LOG_INFO("100*(runtime_estimate - (timeNow - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (timeNow - fuel_t0)) / runtime_estimate);
+//				NRF_LOG_INFO("(runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate)));
 
 				// Need to be careful.. don't lose precision (use float), and don't overflow int (break into 2 calcs)
 				float temp = (runtime_estimate - (timeNow - fuel_t0)) / (1.0f*runtime_estimate);	// % of runtime estimate.  Calc separately to avoid uint32 overflow
