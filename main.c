@@ -106,18 +106,11 @@
 //#include "app_uart.h"
 //#include "app_util_platform.h"
 #include "bsp_btn_ble.h"
-//#if defined (UART_PRESENT)
-//#include "nrf_uart.h"
-//#endif
-//#if defined (UARTE_PRESENT)
-//#include "nrf_uarte.h"
-//#endif
-//#include "nrf_log.h"
-//#include "nrf_log_ctrl.h"
-//#include "nrf_log_default_backends.h"
-#define SUM		0
-#define HAP		1
-#define CUSTOM	2
+
+#define SUM				0
+#define HAP				1
+#define BATTERY_TEST	2
+#define CUSTOM			3
 
 
 
@@ -125,7 +118,7 @@
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, CUSTOM,
+#define PRODUCT_TYPE	BATTERY_TEST	//	OPTIONS: SUM, HAP, BATTERY_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
@@ -133,7 +126,8 @@
 #define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms	~2.5s is min
 //#define PLANTOWER_STARTUP_WAIT_TIME		1*1000	//ms
 #define SPEC_CO_STARTUP_WAIT_TIME		6*1000	//ms
-#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
+#define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
+//#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
@@ -142,6 +136,7 @@
 #define WAIT_BETWEEN_SAMPLES		0	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
 #define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
+#define INITIAL_MSG_WAIT			2000	// <500 causes issues?
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 
@@ -189,6 +184,7 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	#define DEVICE_NAME                     "SENSEN_SUM"                               /**< Name of device. Will be included in the advertising data. */
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -205,6 +201,26 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_10Ah;
+	#define DEVICE_NAME                     "SENSEN_HAP"                               /**< Name of device. Will be included in the advertising data. */
+#elif PRODUCT_TYPE == BATTERY_TEST
+	static component_type components_used[] = {
+//		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
+		SDC,		// SD card, SPIO
+		BATTERY,	// AIN(no pin),	3279
+		FUEL_GAUGE,	// I2C
+		TEMP_NRF,	// REGISTER
+		RTC,		// I2C
+	//////				UV_SI1145,		// I2C
+			BME,		// I2C
+			SMALL_PLANTOWER,	// I2C,	2
+	//		SPEC_CO,	// AIN,			102
+	//		FIGARO_CO2,	// I2C,			579
+	//////			DEEP_SLEEP,
+	};
+	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	#define DEVICE_NAME                     "SENSEN_BATT"                               /**< Name of device. Will be included in the advertising data. */
 #else
 	static component_type components_used[] = {
 //		ADP,		// DIG
@@ -223,6 +239,7 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
@@ -252,9 +269,6 @@ static ret_code_t err_code;
 
 /** SD Card Variables.  From example: peripheral/fatfs **/
 #define FILE_NAME   "test.TXT"
-////#define BLE_TEST_FILE_NAME   "ble_test.TXT"
-////#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
-//#define BLE_TEST_FILE_NAME   "ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
 #define MAX_OUT_STR_SIZE	200
 #if PRODUCT_TYPE == SUM
 	#define FILE_HEADER	"Time, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
@@ -379,6 +393,8 @@ static nrf_saadc_value_t battery_value;
 	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 #elif PRODUCT_TYPE == HAP
 	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+#elif PRODUCT_TYPE == BATTERY_TEST
+	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 #else
 //	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
@@ -388,7 +404,6 @@ static uint32_t fuel_percent = 0;	// units: percent*1000
 static uint32_t fuel_percent_raw = 0;	// units: percent*1000
 //#define FUEL_SCALE_FACTOR		2.589	// Factor of how much time expansion
 //#define FLOAT_FACTOR			1000
-#define FUEL_PERCENT_THRESHOLD	1.200	//20	// Start extrapolating after this threshold (%)
 static uint32_t runtime_estimate = 0;	// units: percent*1000
 static uint32_t fuel_p0 = 0;	// units: percent*1000
 static uint32_t fuel_t0 = 0;	// units: percent*1000
@@ -462,17 +477,12 @@ static int meas_loop_wait_done = 0;
 APP_TIMER_DEF(meas_loop_timer);
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
-//#define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
-//static int plantower_startup_wait_done = 0;
-//static volatile int plantower_startup_wait_done = 0;
 static volatile bool plantower_startup_wait_done = false;
 static volatile bool specCO_startup_wait_done = false;
 APP_TIMER_DEF(plantower_startup_timer);
 APP_TIMER_DEF(specCO_startup_timer);
-//#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//ms
 static int hpm_startup_wait_done = 0;
 APP_TIMER_DEF(hpm_startup_timer);
-//#define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 
 // Pins for the custom Sensen boards
 #define TWI_SCL_PIN			27		///< 	P0.27 SCL pin.
@@ -543,6 +553,7 @@ static ble_uuid_t m_adv_uuids[]          =                                      
 };
 
 #define BLE_TX_PACKET_SIZE	20
+static ble_gap_addr_t ble_gap_address;
 
 //-------------------------------------------------------
 
@@ -689,8 +700,6 @@ void sd_open(char fname[], BYTE mode) {
     // Open SD
 //    NRF_LOG_INFO("Opening file " FILE_NAME "...");
     NRF_LOG_INFO("Opening file: %s", fname);
-//    ff_result = f_open(&file, FILE_NAME, FA_READ | FA_WRITE | FA_OPEN_APPEND);
-//    ff_result = f_open(&file, FILE_NAME, FA_READ | FA_WRITE);
     ff_result = f_open(&file, fname, mode);
     if (ff_result != FR_OK) {
         NRF_LOG_INFO("Unable to open or create file: %s, %d", fname, ff_result);
@@ -729,39 +738,10 @@ uint32_t read_SDC() {
 		NRF_LOG_INFO("** ERROR read_SDC(): read failed, ff_result: %d **", ff_result);
 		return ff_result;
 	}
-//	else {
-//		NRF_LOG_INFO("bytes_read: %d.", bytes_read);
-//		if (bytes_read == SDC_BUFF_SIZE) {
-//			return NRF_SUCCESS;
-//		} else {
-//			return NRF_ERROR_INVALID_LENGTH;
-//		}
-//	}
 
 	return bytes_read;
 }
 
-
-//// Gets a packet for BLE sending from SDC.  Either splits the pre-read buffer or reads a new buffer
-////ret_code_t get_SDC_packet(uint8_t * buff, uint16_t buff_length) {
-//ret_code_t get_SDC_packet(uint16_t buff_length) {
-//
-//	if (sdc_buff_current_pos == 0) {
-//		err_code = read_SDC();
-//	}
-//
-////	buff = sdc_buff + sdc_buff_current_pos;
-//	sdc_buff_current_pos += buff_length;
-//
-//	// CAREFUL: need to cover case when there is a little left in the buffer
-//	if (sdc_buff_current_pos >= SDC_BUFF_SIZE) {
-//		sdc_buff_current_pos = 0;	// Reset to beginning
-//	}
-//
-//
-//	return NRF_SUCCESS;
-//
-//}
 
 /**
  * Save all of the data
@@ -848,14 +828,6 @@ static void send_sdc_packets() {
     // Keep sending packets until buffers are full, then wait for completion
     while (true)
     {
-//    	err_code = get_SDC_packet(sdc_packet, send_length);
-//    	err_code = get_SDC_packet(send_length);
-
-//		sd_init();
-//		sd_mount();
-////		sd_open(BLE_TEST_FILE_NAME, FA_READ | FA_WRITE);
-//		sd_open(BLE_TEST_FILE_NAME, FA_READ);
-
     	// Read from SDC if starting from the beginning
 //    	if (sdc_buff_current_pos == 0 && !done_reading_sdc) {
 //		if (sdc_buff_current_pos == 0) {
@@ -907,9 +879,6 @@ static void send_sdc_packets() {
         	NRF_LOG_INFO("sdc_buff_current_pos: %d", sdc_buff_current_pos);
         	NRF_LOG_INFO("cnt: %d", cnt);
 //        	NRF_LOG_INFO("send_sdc_packets(), %d, err_code: %d", NRF_ERROR_RESOURCES, err_code);
-//        	APP_ERROR_CHECK(err_code);
-//        	resending_packets = true;
-//        	nrf_delay_ms(1000);
             break;
         }
         else if (err_code != NRF_SUCCESS)
@@ -935,12 +904,6 @@ static void send_sdc_packets() {
 
 				break;
 			}
-
-//			// CAREFUL: need to cover case when there is a little left in the buffer
-//			if (sdc_buff_current_pos >= sdc_bytes_read) {
-//				sdc_buff_current_pos = 0;	// Reset to beginning
-//			}
-
 
 			// FOR TESTING: REMOVE LATER
 //        	sd_uninit();
@@ -982,44 +945,7 @@ static void send_sdc_data() {
 //    }
 
 
-//	// Read a big block, then send 20B chunks
-//	err_code = read_SDC();
-//    for(int i = 0; (i+packet_length) <= SDC_BUFF_SIZE; i += packet_length) {
-//
-//		err_code = ble_nus_string_send(&m_nus, &sdc_buff[i], &packet_length);
-//		if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_BUSY) )
-//		{
-//			APP_ERROR_CHECK(err_code);
-//		}
-//    }
-
-
 	send_sdc_packets();
-
-
-
-//    // Uninit stuff.  O/w will not write on subsequent loops if ADP shuts off SDC; also drains power
-////	if (done_reading_sdc) {
-//	if (done_sending_sdc) {
-//		NRF_LOG_INFO("send_sdc_data(): Uninit SDC");
-//
-//		(void) f_close(&file);
-//		ff_result = f_mount(0, "", 1);
-//		if (ff_result) {
-//			NRF_LOG_INFO("** WARNING: UNmount Failed, ff_result: %d", ff_result);
-//		}
-//		DSTATUS disk_state = disk_uninitialize(0);
-//		if (disk_state != 1) {
-//			NRF_LOG_INFO("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
-//		}
-//		nrf_gpio_pin_clear(ADP1_PIN);		// Enable HIGH
-
-
-//		// reset flag
-//		start_sending_sdc_data = false;
-//	}
-
-
 
 }
 
@@ -1051,80 +977,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
         if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length-1] == flag_send) {
             NRF_LOG_DEBUG("Detected flag_send: %c, sending data", flag_send);
 
-//            // Send some data to App
-//            do
-//            {
-//            	uint8_t data[] = "123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 ";
-//                uint16_t length = sizeof(data);
-//                err_code = ble_nus_string_send(&m_nus, data, &length);
-//                if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_BUSY) )
-//                {
-//                    APP_ERROR_CHECK(err_code);
-//                }
-//            } while (err_code == NRF_ERROR_BUSY);
-
             start_sending_sdc_data = true;
-
-
-
-
-
-//            // Read the SD card and send the data
-//            uint16_t packet_length = BLE_TX_PACKET_SIZE;
-//
-//            nrf_gpio_cfg_output(ADP1_PIN);
-//        	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
-//            nrf_gpio_cfg_output(ADP2_PIN);
-//        	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
-//        	nrf_delay_ms(1000);
-//
-//            sd_init();
-//
-//
-////        	NRF_BLOCK_DEV_SDC_DEFINE(
-////        	        m_block_dev_sdc,
-////        	        NRF_BLOCK_DEV_SDC_CONFIG(
-////        	                SDC_SECTOR_SIZE,
-////        	                APP_SDCARD_CONFIG(SDC_MOSI_PIN, SDC_MISO_PIN, SDC_SCK_PIN, SDC_CS_PIN)
-////        	         ),
-////        	         NFR_BLOCK_DEV_INFO_CONFIG("Nordic", "SDC", "1.00")
-////        	);
-////
-////        	DSTATUS disk_state = STA_NOINIT;
-////
-////        	// Initialize FATFS disk I/O interface by providing the block device.
-////        	static diskio_blkdev_t drives[] =
-////        	{
-////        			DISKIO_BLOCKDEV_CONFIG(NRF_BLOCKDEV_BASE_ADDR(m_block_dev_sdc, block_dev), NULL)
-////        	};
-////
-////        	diskio_blockdev_register(drives, ARRAY_SIZE(drives));
-////
-////        	NRF_LOG_INFO("Initializing disk 0 (SDC)...");
-////        	for (uint32_t retries = 3; retries && disk_state; --retries)
-////        	{
-////        		NRF_LOG_INFO("--BI");
-////        		disk_state = disk_initialize(0);
-////        		NRF_LOG_INFO("--AI");
-////        	}
-////        	if (disk_state)
-////        	{
-////        		NRF_LOG_INFO("Disk initialization failed. disk_state: %d", disk_state);
-////        	}
-//
-//
-//            sd_mount();
-//            sd_open(FA_READ | FA_WRITE);
-//            read_SDC();
-//            err_code = ble_nus_string_send(&m_nus, sdc_buff, &packet_length);
-//            if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_BUSY) )
-//            {
-//                APP_ERROR_CHECK(err_code);
-//            }
-
-
-
-
         }
 
 
@@ -1132,8 +985,6 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 
     if (p_evt->type == BLE_NUS_EVT_TX_RDY) {
     	NRF_LOG_INFO("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
-//		NRF_LOG_INFO("ble_evt_handler(): BLE_GATTS_EVT_HVN_TX_COMPLETE");
-//		NRF_LOG_INFO("resending_packets: %d, done_reading_sdc: %d", resending_packets, done_reading_sdc);
 //		if (resending_packets) {
 		if (!done_sending_sdc) {
 	    	NRF_LOG_INFO("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
@@ -1931,7 +1782,6 @@ void saadc_init(void)
     err_code = nrf_drv_saadc_channel_init(BATTERY_CHANNEL_NUM, &battery_channel_config);
     APP_ERROR_CHECK(err_code);
 
-
 }
 
 
@@ -2503,7 +2353,8 @@ static void calc_fuel_percent() {
 		} else {	// More complicated: Estimate total runtime and take percentage of that
 			if (runtime_estimate == 0) {	// estimate runtime only the first time it falls below threshold
 				runtime_estimate = (timeNow - t0) * battery_scale_factor * ((1.0f*(100-FUEL_PERCENT_THRESHOLD)*1000) / (1.0f*fuel_p0-FUEL_PERCENT_THRESHOLD*1000));	// Later part corrects for not starting at 100% battery
-				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_percent_raw) / (1.0f*100*1000));
+//				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_percent_raw) / (1.0f*100*1000));
+				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_p0) / (1.0f*100*1000));
 			}
 
 			NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
@@ -2610,8 +2461,6 @@ static ret_code_t UV_SI1145_read() {
 	NRF_LOG_INFO("cmd[2] = 0x%x", cmd[2]);
 	NRF_LOG_INFO("cmd[3] = 0x%x", cmd[3]);
 
-
-
     // Read the UV data
     regt = 0x2C;	// start of UV data
     err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, &regt, 1, true);
@@ -2678,35 +2527,10 @@ static ret_code_t read_plantower_twi()
 }
 
 
-
-
 /**
  * For getting the Temp internally through the nRF
  */
 int32_t get_temp_nrf(void) {
-
-    // This function contains workaround for PAN_028 rev2.0A anomalies 28, 29,30 and 31.
-//    int32_t volatile temp;
-//
-//    nrf_temp_init();
-//
-//	NRF_TEMP->TASKS_START = 1; /** Start the temperature measurement. */
-//
-//	/* Busy wait while temperature measurement is not finished, you can skip waiting if you enable interrupt for DATARDY event and read the result in the interrupt. */
-//	/*lint -e{845} // A zero has been given as right argument to operator '|'" */
-//	while (NRF_TEMP->EVENTS_DATARDY == 0)
-//	{
-//		// Do nothing.
-//	}
-//	NRF_TEMP->EVENTS_DATARDY = 0;
-//
-//	/**@note Workaround for PAN_028 rev2.0A anomaly 29 - TEMP: Stop task clears the TEMP register. */
-//	temp = (nrf_temp_read() / 4);
-//
-//	/**@note Workaround for PAN_028 rev2.0A anomaly 30 - TEMP: Temp module analog front end does not power down when DATARDY event occurs. */
-//	NRF_TEMP->TASKS_STOP = 1; /** Stop the temperature measurement. */
-
-
 
     // Can't do above with SoftDevice
     int32_t temp;
@@ -2715,12 +2539,6 @@ int32_t get_temp_nrf(void) {
 
 	return temp;
 }
-
-
-
-
-
-
 
 
 /**
@@ -2796,7 +2614,6 @@ void get_data() {
 		NRF_LOG_INFO("dht_humidity: %d", dht_humidity);
 		dht_uninit();
 	}
-
 
 
 	// Testing GPIO
@@ -2895,7 +2712,8 @@ void get_data() {
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
 			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
-			set_rtc(00, 57, 13, 4, 9, 5, 18);	// about 11 seconds of delay
+//			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
+			set_rtc(00, 58, 14 +4, 5, 10, 5, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -2926,7 +2744,6 @@ void get_data() {
 	}
 
 
-
 	// Trying to read sample from ADC
 	if (using_component(ADC, components_used)) {
 		NRF_LOG_INFO("");
@@ -2943,7 +2760,6 @@ void get_data() {
 //		NRF_LOG_INFO("adc_value (\%): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V/MBED_VREF));
 	//	nrf_drv_saadc_sample();		// Non-blocking function
 	}
-
 
 
 	// Sharp PM, Analog read.  TODO: implement sample LED
@@ -2975,11 +2791,6 @@ void get_data() {
 		NRF_LOG_INFO("Sample 1: %d", sharpPM_value);
 		NRF_LOG_INFO("sharpPM_value (mV): %d", sharpPM_value*1000*1000/V_to_adc_1000);
 	}
-
-
-
-
-
 
 
 	// Figaro CO, Analog read.
@@ -3018,19 +2829,8 @@ void get_data() {
 //		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
 	}
 
+
 	// TODO: Maybe nrf_drv_saadc_uninit() here to save power: "The SAADC is only enabled before sampling and disabled when sampling completes to avoid high current consumption of the EasyDMA"
-//	nrf_drv_saadc_abort();
-//	nrf_drv_saadc_channel_uninit(ADC_CHANNEL_NUM);
-//	nrf_drv_saadc_channel_uninit(SHARP_PM_CHANNEL_NUM);
-//	nrf_drv_saadc_channel_uninit(SPEC_CO_CHANNEL_NUM);
-//	nrf_drv_saadc_channel_uninit(FIG_CO_CHANNEL_NUM);
-//	nrf_drv_saadc_channel_uninit(BATTERY_CHANNEL_NUM);
-//	nrf_drv_saadc_uninit();
-//    NRF_SAADC->INTENCLR = (SAADC_INTENCLR_END_Clear << SAADC_INTENCLR_END_Pos);
-//    NVIC_ClearPendingIRQ(SAADC_IRQn);
-////	NVIC_ClearPendingIRQ(SAADC_IRQn);
-
-
 
 
 	// Check Fuel Gauge (LiPo battery level), TWI (I2C)
@@ -3346,14 +3146,6 @@ int test_main() {
 		err_code = app_timer_start(hpm_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), NULL);
 		APP_ERROR_CHECK(err_code);
 	}
-//	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LOG_INTERVAL), NULL);
-//	APP_ERROR_CHECK(err_code);
-
-
-//	nrf_delay_ms(1000);
-
-//NRF_LOG_INFO("--ST");
-//if (0) {
 
 
 	// Initialize things before getting data
@@ -3363,26 +3155,6 @@ int test_main() {
 	NRF_LOG_INFO("--BTWI");
     twi_init();
 	NRF_LOG_INFO("--ATWI");
-//    // Init Fuel Gauge
-//	if (using_component(FUEL_GAUGE, components_used)) {
-//		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
-//
-//	    // Quick start once for initial guess
-////		if (!has_quick_started_fuel_gauge) {
-////		if (0) {
-////			NRF_LOG_INFO("Quick starting fuel gauge..");
-////			fuel_gauge_quick_start();
-////			has_quick_started_fuel_gauge = true;
-////		}
-//
-//	}
-//
-//	NRF_LOG_INFO("--AFG");
-
-
-
-//NRF_LOG_INFO("--ST");
-//if (0) {
 
 	// All the measurements happen here
 	err_cnt = 0;
@@ -3391,16 +3163,12 @@ int test_main() {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("-- SAMPLE #%d/%d --", i+1, NUM_SAMPLES_PER_ON_CYCLE);
 
-//NRF_LOG_INFO("--ST");
-//if (0) {
-
 		// Read all of the sensors
 		get_data();
 		// Save the data to SD card
 		if (using_component(SDC, components_used)) {
 			save_data();
 		}
-//}	// REMOVE
 
 		// Wait between multiple samples as a buffer time, just in case
 		if (NUM_SAMPLES_PER_ON_CYCLE > 1) {
@@ -3410,19 +3178,9 @@ int test_main() {
 		}
 
 	}
-//}	// REMOVE
 
-
-//	// Uninitialize things
-//	NRF_LOG_INFO("--BFGS");
-//	if (using_component(FUEL_GAUGE, components_used)) {
-//		fuel_gauge_sleep();	// Turn off to save power
-//	}
-//	NRF_LOG_INFO("--AFGS");
 	// TWI (I2C) UNinit
     nrf_drv_twi_uninit(&m_twi);
-
-//}	// REMOVE
 
     // ADP sleep, turn OFF all power
 	if (using_component(ADP, components_used)) {
@@ -3499,119 +3257,37 @@ int test_main() {
 static void test_all()
 {
 
-//	// Initial delay so Fuel Gauge starts with good initial guess
-//	if (using_component(FUEL_GAUGE, components_used)) {
-//		nrf_delay_ms(INITIAL_FUEL_GAUGE_WAIT);
-//	}
+
+	err_cnt = test_main();
+	err_cnt_total += err_cnt;
+
+	NRF_LOG_FLUSH();
+	NRF_LOG_INFO("");
+	NRF_LOG_INFO("-- SUMMARY --");
+
+	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+	NRF_LOG_INFO("ble_gap_address = %x", ble_gap_address.addr);
+	NRF_LOG_INFO("ble_gap_address.addr[0] = %x", ble_gap_address.addr[0]);
+	NRF_LOG_INFO("ble_gap_address.addr[1] = %x", ble_gap_address.addr[1]);
+	NRF_LOG_INFO("ble_gap_address.addr[2] = %x", ble_gap_address.addr[2]);
+	NRF_LOG_INFO("ble_gap_address.addr[3] = %x", ble_gap_address.addr[3]);
+	NRF_LOG_INFO("ble_gap_address.addr[4] = %x", ble_gap_address.addr[4]);
+	NRF_LOG_INFO("ble_gap_address.addr[5] = %x", ble_gap_address.addr[5]);
 
 
-//    /** Initialize general stuff	**/
-//    bsp_board_leds_init();
-//	// Turn OFF LED's
-//    nrf_gpio_cfg_output(SAMPLE_LED);
-//	nrf_gpio_pin_clear(SAMPLE_LED);	// Enable HIGH, Turn OFF LED
-//	nrf_gpio_cfg_output(STATUS_LED);
-//	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
+	NRF_LOG_INFO("timeNow = %d", timeNow);
+	NRF_LOG_INFO("err_cnt = %d", err_cnt);
+	NRF_LOG_INFO("err_cnt_total = %d", err_cnt_total);
+	NRF_LOG_INFO("dht_error_cnt_total = %d", dht_error_cnt_total);
+	NRF_LOG_INFO("hpm_error_cnt_total = %d", hpm_error_cnt_total);
+	NRF_LOG_INFO("LOG_INTERVAL = %d", LOG_INTERVAL);
+	NRF_LOG_INFO("*** test_main() COMPLETE!, next loop_num: %d ***", loop_num);
+	NRF_LOG_FLUSH();
 
-//    // NRF_LOG setup
-//    APP_ERROR_CHECK(NRF_LOG_INIT(NULL));
-//    NRF_LOG_DEFAULT_BACKENDS_INIT();
+	meas_loop_wait_done = 0;
 
-
-
-//    // TODO: Check USING_PLANTOWER && USING_HONEYWELL
-//	// ADC setup
-//    saadc_init();
-//    // TWI (I2C) init
-//    twi_init();
-//    nrf_delay_ms(1000);
-//    nrf_drv_twi_uninit(&m_twi);
-
-
-//    // Startup Message
-//	NRF_LOG_INFO("");
-//	NRF_LOG_INFO("-----------------");
-//	NRF_LOG_INFO("| Initial Setup |");
-//	NRF_LOG_INFO("-----------------");
-
-
-//    // Setup Watchdog Timer
-//	NRF_LOG_INFO("Start Watchdog Timer... WDT_TIMEOUT: %d", WDT_TIMEOUT);
-//	if (!nrf_drv_clock_init_check() ) {
-//		err_code = nrf_drv_clock_init();
-//		NRF_LOG_DEBUG("nrf_drv_clock_init() err_code: %d", err_code);
-//		APP_ERROR_CHECK(err_code);
-//	}
-//    nrf_drv_clock_lfclk_request(NULL);
-//    err_code = app_timer_init();	// CAREFULL, MAYBE DON'T NEED THIS SINCE INIT ALREADY
-//	NRF_LOG_DEBUG("app_timer_init() err_code: %d", err_code);
-//    APP_ERROR_CHECK(err_code);
-//    // Default values: Pause in SLEEP, Run in HALT; 2000 ms; IRQ 7
-//    nrf_drv_wdt_config_t wdt_config = NRF_DRV_WDT_DEAFULT_CONFIG;
-//    wdt_config.reload_value = WDT_TIMEOUT;
-//    err_code = nrf_drv_wdt_init(&wdt_config, wdt_event_handler);
-//    APP_ERROR_CHECK(err_code);
-//    err_code = nrf_drv_wdt_channel_alloc(&wdt_meas_channel_id);
-//    APP_ERROR_CHECK(err_code);
-//    nrf_drv_wdt_enable();
-
-//    // ADP, turn OFF all power: start with power off when entering loop.
-//	NRF_LOG_INFO("Starting with ADP Power OFF... LOW");
-//    nrf_gpio_cfg_output(ADP1_PIN);
-//	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
-//    nrf_gpio_cfg_output(ADP2_PIN);
-//	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH
-
-
-//	// Prepare timer for startup wait (depends on each sensor)
-//    err_code = app_timer_create(&dht_startup_timer,
-//    							APP_TIMER_MODE_SINGLE_SHOT,
-//                                dht_startup_handler);	// sets a flag when timer expires
-//    err_code = app_timer_create(&plantower_startup_timer,
-//    							APP_TIMER_MODE_SINGLE_SHOT,
-//                                plantower_startup_handler);	// sets a flag when timer expires
-//    err_code = app_timer_create(&hpm_startup_timer,
-//    							APP_TIMER_MODE_SINGLE_SHOT,
-//                                hpm_startup_handler);	// sets a flag when timer expires
-////    NRF_LOG_INFO("err_code: %d", err_code);
-//    APP_ERROR_CHECK(err_code);
-
-//    int num_test_main = 3;	// Each loop takes ~ 12s
-//	for (int i=0; i < num_test_main; i++) {
-//	while (1) {
-		err_cnt = test_main();
-		err_cnt_total += err_cnt;
-
-		NRF_LOG_FLUSH();
-		NRF_LOG_INFO("");
-		NRF_LOG_INFO("-- SUMMARY --");
-		NRF_LOG_INFO("timeNow = %d", timeNow);
-		NRF_LOG_INFO("err_cnt = %d", err_cnt);
-		NRF_LOG_INFO("err_cnt_total = %d", err_cnt_total);
-		NRF_LOG_INFO("dht_error_cnt_total = %d", dht_error_cnt_total);
-		NRF_LOG_INFO("hpm_error_cnt_total = %d", hpm_error_cnt_total);
-		NRF_LOG_INFO("LOG_INTERVAL = %d", LOG_INTERVAL);
-		NRF_LOG_INFO("*** test_main() COMPLETE!, next loop_num: %d ***", loop_num);
-		NRF_LOG_FLUSH();
-
-		meas_loop_wait_done = 0;
-
-//		nrf_delay_ms(LOG_INTERVAL);
-//	}
-
-//	NRF_LOG_INFO("");
-//	NRF_LOG_INFO("***** ALL LOOPING COMPLETE! *****");
-
-//	return NRF_SUCCESS;
 
 }
-
-
-//static void test_timer() {
-//	NRF_LOG_INFO("test_timer()");
-//	err_code = app_timer_start(plantower_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), NULL);
-//	APP_ERROR_CHECK(err_code);
-//}
 
 
 // Timeout handlers for startup waits with the single shot timers
@@ -3686,46 +3362,13 @@ static void timers_init(void)
  */
 int main(void) {
 
-//	component_type components_used[] = {
-//			ADP,		// DIG
-//			SDC,		// SD card, SPIO
-//			BATTERY,	// AIN(no pin),	3279
-//			FUEL_GAUGE,	// I2C
-//			TEMP_NRF,	// REGISTER
-//			RTC,		// I2C
-////			UV_SI1145,		// I2C
-//			BME,		// I2C
-//////			SHARP,		// AIN + DIG,	70
-//////			FIGARO_CO,	// AIN,			1643
-//			SMALL_PLANTOWER,	// I2C,	2
-////			SPEC_CO,	// AIN,			102
-////			FIGARO_CO2,	// I2C,			579
-//////			DEEP_SLEEP,
-//	};
-//	components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-
-
-
-
-
-
-//	// BLE Stuff
-//    bool     erase_bonds;
-//
-//    // Initialize.
-////    err_code = app_timer_init();
-////    APP_ERROR_CHECK(err_code);
-//    timers_init();
-//
-////    uart_init();
-//    log_init();
-
 
 	// Initial delay so Fuel Gauge starts with good initial guess
 	// NOTE: MAYBE MOVE THIS SOMEWHERE ELSE, if LEDs or ADPs are drawing power on powerup
 	if (using_component(FUEL_GAUGE, components_used)) {
 		nrf_delay_ms(INITIAL_FUEL_GAUGE_WAIT);
 	}
+
 
     // Startup Message
     log_init();
@@ -3738,6 +3381,8 @@ int main(void) {
 	    NRF_LOG_INFO("PRODUCT_TYPE: SUM");
 	} else if (PRODUCT_TYPE == HAP) {
 	    NRF_LOG_INFO("PRODUCT_TYPE: HAP");
+	} else if (PRODUCT_TYPE == BATTERY_TEST) {
+	    NRF_LOG_INFO("PRODUCT_TYPE: BATTERY_TEST");
 	} else if (PRODUCT_TYPE == CUSTOM) {
 	    NRF_LOG_INFO("PRODUCT_TYPE: CUSTOM");
 	} else {
@@ -3777,16 +3422,25 @@ int main(void) {
 //    wdt_init();
 
 
-
-
-
 	// Main section that uses sensors
 //	err_code = test_all(components_used);
 //	err_code = test_all();
 
-
-
-
+    // Save some values
+    sd_ble_gap_addr_get(&ble_gap_address);
+	// Other info user cares about
+	NRF_LOG_INFO("LOG_INTERVAL = %d", LOG_INTERVAL);
+	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
+	NRF_LOG_INFO("PLANTOWER_STARTUP_WAIT_TIME = %d", PLANTOWER_STARTUP_WAIT_TIME);
+	NRF_LOG_INFO("SPEC_CO_STARTUP_WAIT_TIME = %d", SPEC_CO_STARTUP_WAIT_TIME);
+	NRF_LOG_INFO("FUEL_PERCENT_THRESHOLD = %d", FUEL_PERCENT_THRESHOLD);
+	NRF_LOG_INFO("DEVICE_NAME = %s", DEVICE_NAME);
+//	NRF_LOG_INFO("NUM_SAMPLES_PER_ON_CYCLE = %d", NUM_SAMPLES_PER_ON_CYCLE);
+//	NRF_LOG_INFO("WAIT_BETWEEN_SAMPLES = %d", WAIT_BETWEEN_SAMPLES);
+	NRF_LOG_INFO("SETTING_TIME_MANUALLY = %d", SETTING_TIME_MANUALLY);
+	NRF_LOG_INFO("SD_FAIL_SHUTDOWN = %d", SD_FAIL_SHUTDOWN);
+	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+	NRF_LOG_FLUSH();
 
 
 //    printf("\r\nUART Start! (printf)\r\n");
@@ -3794,6 +3448,9 @@ int main(void) {
     err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
 //    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_SLOW);	// Unknown error
     APP_ERROR_CHECK(err_code);
+
+    // Let the user read the startup messages
+	nrf_delay_ms(INITIAL_MSG_WAIT);
 
     // Start timer for main measurement loop
 	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LOG_INTERVAL), NULL);
@@ -3814,15 +3471,6 @@ int main(void) {
 			send_sdc_data();
         }
     }
-
-
-
-
-
-
-//	// Main section that uses sensors
-//	err_code = test_all(components_used);
-
 
 }
 
