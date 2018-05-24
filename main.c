@@ -107,6 +107,15 @@
 //#include "app_util_platform.h"
 #include "bsp_btn_ble.h"
 
+/**
+ * Some function prototypes so we can rearrange code below
+ */
+static void test_all();
+static ret_code_t set_rtc(uint8_t sec, uint8_t min, uint8_t hour, uint8_t wday, uint8_t date, uint8_t mon, uint8_t year);
+void twi_init (void);
+
+
+
 #define SUM				0
 #define HAP				1
 #define BATTERY_TEST	2
@@ -121,13 +130,15 @@
 #define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, BATTERY_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
-//#define LOG_INTERVAL				10*1000		// ms between sleep/wake
-#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
+static uint32_t log_interval = 10*1000;	// units: ms
+//static uint32_t log_interval = 1000*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		1*1000	//3*1000	//ms
+#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
 //#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
 #define SPEC_CO_STARTUP_WAIT_TIME		1*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
+//#define LOG_INTERVAL				10*1000		// ms between sleep/wake
+//#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
 //#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
@@ -220,7 +231,8 @@ typedef enum {
 	//////			DEEP_SLEEP,
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-	static battery_type battery_type_used = BAT_LIPO_10Ah;	//BAT_LIPO_1200mAh;
+	static battery_type battery_type_used = BAT_LIPO_1200mAh;	//BAT_LIPO_1200mAh;
+//	min_battery_level = 0;
 	#define DEVICE_NAME                     "BATT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 #else
 	static component_type components_used[] = {
@@ -340,6 +352,7 @@ static int32_t time_now = 0;
 static int32_t t0 = 0;
 static int16_t rtc_temp = 0;	// units: degC*100, precision +/- 0.25C
 static int time_was_set = 0;
+static bool setting_new_time = false;
 
 /** NRF Internal temp **/
 static int32_t temp_nrf = 0;	// units: degC*100, precision +/- 0.25C
@@ -470,11 +483,11 @@ nrf_drv_wdt_channel_id wdt_meas_channel_id;
 nrf_drv_wdt_channel_id wdt_sleep_channel_id;
 #define WDT_TIMEOUT_MEAS		60*1000 + NUM_SAMPLES_PER_ON_CYCLE*(WAIT_BETWEEN_SAMPLES+1000) + (DHT_STARTUP_WAIT_TIME + PLANTOWER_STARTUP_WAIT_TIME + SPEC_CO_STARTUP_WAIT_TIME + HPM_STARTUP_WAIT_TIME)	// ms, make it more than DHT and HPM delays
 //#define WDT_TIMEOUT_MEAS		15*1000
-#define WDT_TIMEOUT_SLEEP		LOG_INTERVAL + WDT_TIMEOUT_MEAS
+//#define WDT_TIMEOUT_SLEEP		LOG_INTERVAL + WDT_TIMEOUT_MEAS
 static int wdt_triggered = 0;
 
 /** APP TIMERS **/
-static int meas_loop_wait_done = 0;
+static bool meas_loop_wait_done = false;
 APP_TIMER_DEF(meas_loop_timer);
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
@@ -576,7 +589,7 @@ static ble_gap_addr_t ble_gap_address;
 #define BLE_UUID_FW_VER_CHARACTERISTIC			0x0000 // The Firmware Version
 
 // Sensen Service specific chars
-#define BLE_UUID_IS_LOGGING_CHARACTERISTIC		0x0010 // The Firmware Version
+#define BLE_UUID_ON_LOGGING_CHARACTERISTIC		0x0010 // The Firmware Version
 #define BLE_UUID_LOG_INTERVAL_CHARACTERISTIC	0x0011 // The Firmware Version
 #define BLE_UUID_BATT_PERCENT_CHARACTERISTIC	0x0012 // The Firmware Version
 #define BLE_UUID_MIN_BATT_CHARACTERISTIC		0x0013 // The Firmware Version
@@ -599,10 +612,13 @@ static char SUM_FW_version[] = 		"SUM_v1.00";
 static char HAP_FW_version[] = 		"HAP_v1.00";
 
 // Sensen Service values
-static bool is_logging = true;
-static uint32_t log_interval = LOG_INTERVAL;	// units: ms
-static uint32_t min_battery_level = 10*1000;	// units: percent*1000
+static bool is_logging = false;			// Whether we are currently logging
+static bool on_logging = false;	// Whether the App wants to turn on logging
+//static uint32_t log_interval = LOG_INTERVAL;	// units: ms
+static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
 static int32_t time_to_be_set = 0;
+static bool is_live_streaming = false;	// Used to skip stuff we don't want when live streaming
+#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 
 #define DATA_OFFLOAD_PACKET_SIZE	20
 
@@ -616,7 +632,7 @@ typedef struct
 	ble_gatts_char_handles_t    char_handles;
 	ble_gatts_char_handles_t    fw_ver_handles;
 	// Sensen Service specific chars
-	ble_gatts_char_handles_t    is_logging_handles;
+	ble_gatts_char_handles_t    on_logging_handles;
 	ble_gatts_char_handles_t    log_rate_handles;
 	ble_gatts_char_handles_t    batt_percent_handles;
 	ble_gatts_char_handles_t    min_batt_handles;
@@ -637,10 +653,20 @@ static ble_custom_service_t m_SS_service;
 static ble_custom_service_t m_SUM_service;
 static ble_custom_service_t m_HAP_service;
 
-static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
-//static ble_custom_service_t * p_product_specific_service = &m_SUM_service;
+#if PRODUCT_TYPE == SUM
+	static ble_custom_service_t * p_product_specific_service = &m_SUM_service;
+#elif PRODUCT_TYPE == HAP
+	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+#elif PRODUCT_TYPE == BATTERY_TEST
+	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+#else
+	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+#endif
 
-#define OUR_CHAR_TIMER_INTERVAL		1000
+//static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+////static ble_custom_service_t * p_product_specific_service = &m_SUM_service;
+
+//#define LIVE_STREAM_UPDATE_INTERVAL		1000
 
 
 ///**@brief Function for adding our new characterstic to "Our service" that we initiated in the previous tutorial.
@@ -781,8 +807,8 @@ static uint32_t custom_char_add(	ble_custom_service_t * p_our_service,
 //    uint8_t value[p_our_value_size]            = {0};
     attr_char_value.p_value     = p_our_value;
 
-//	NRF_LOG_INFO("p_our_value = %d", p_our_value);
-//	NRF_LOG_INFO("*p_our_value = %d", *p_our_value);
+//	NRF_LOG_DEBUG("p_our_value = %d", p_our_value);
+//	NRF_LOG_DEBUG("*p_our_value = %d", *p_our_value);
 
 
     // OUR_JOB: Step 2.E, Add our new characteristic to the service
@@ -849,10 +875,10 @@ void custom_service_init(ble_custom_service_t * p_custom_service, uint16_t custo
 //
 //    // Print messages to Segger Real Time Terminal
 //    // UNCOMMENT THE FOUR LINES BELOW AFTER INITIALIZING THE SERVICE OR THE EXAMPLE WILL NOT COMPILE.
-//    NRF_LOG_INFO("Executing sensen_service_init()."); // Print message to RTT to the application flow
-//    NRF_LOG_INFO("Service UUID: 0x%04x", service_uuid.uuid); // Print service UUID should match definition BLE_UUID_SENSEN_SERVICE
-//    NRF_LOG_INFO("Service UUID type: 0x%02x", service_uuid.type); // Print UUID type. Should match BLE_UUID_TYPE_VENDOR_BEGIN. Search for BLE_UUID_TYPES in ble_types.h for more info
-//    NRF_LOG_INFO("Service handle: 0x%04x", p_custom_service->service_handle); // Print out the service handle. Should match service handle shown in MCP under Attribute values
+//    NRF_LOG_DEBUG("Executing sensen_service_init()."); // Print message to RTT to the application flow
+//    NRF_LOG_DEBUG("Service UUID: 0x%04x", service_uuid.uuid); // Print service UUID should match definition BLE_UUID_SENSEN_SERVICE
+//    NRF_LOG_DEBUG("Service UUID type: 0x%02x", service_uuid.type); // Print UUID type. Should match BLE_UUID_TYPE_VENDOR_BEGIN. Search for BLE_UUID_TYPES in ble_types.h for more info
+//    NRF_LOG_DEBUG("Service handle: 0x%04x", p_custom_service->service_handle); // Print out the service handle. Should match service handle shown in MCP under Attribute values
 //
 //    // OUR_JOB: Call the function our_char_add() to add our new characteristic to the service.
 //    our_char_add(p_custom_service);
@@ -942,26 +968,27 @@ ret_code_t custom_characteristic_update(ble_custom_service_t *p_our_service, ble
 }
 
 // ALREADY_DONE_FOR_YOU: This is a timer event handler
+//static void timer_timeout_handler(void * p_context)
 static void timer_timeout_handler(void * p_context)
 {
 	NRF_LOG_DEBUG("In timer_timeout_handler()");
 
-    // OUR_JOB: Step 3.F, Update temperature and characteristic value.
-    int32_t temperature = 0;    // Declare variable holding temperature value
-    static int32_t previous_temperature = 0; // Declare a variable to store current temperature until next measurement.
-
-    sd_temp_get(&temperature); // Get temperature
-
-    // Check if current temperature is different from last temperature
-    if(temperature != previous_temperature)
-    {
-        // If new temperature then send notification
-        our_temperature_characteristic_update(&m_SS_service, &temperature);
-    }
-
-    // Save current temperature until next measurement
-    previous_temperature = temperature;
-    nrf_gpio_pin_toggle(LED_4);
+//    // OUR_JOB: Step 3.F, Update temperature and characteristic value.
+//    int32_t temperature = 0;    // Declare variable holding temperature value
+//    static int32_t previous_temperature = 0; // Declare a variable to store current temperature until next measurement.
+//
+//    sd_temp_get(&temperature); // Get temperature
+//
+//    // Check if current temperature is different from last temperature
+//    if(temperature != previous_temperature)
+//    {
+//        // If new temperature then send notification
+//        our_temperature_characteristic_update(&m_SS_service, &temperature);
+//    }
+//
+//    // Save current temperature until next measurement
+//    previous_temperature = temperature;
+//    nrf_gpio_pin_toggle(LED_4);
 
 
     // Plantower PM2_5
@@ -1100,6 +1127,7 @@ static void timer_timeout_handler(void * p_context)
     }
 
 
+	NRF_LOG_DEBUG("OUT timer_timeout_handler()");
 
 }
 
@@ -1139,7 +1167,7 @@ void HardFault_Handler(void)
     uint32_t ia = sp[12]; // Get instruction address from stack
 
 //    printf("Hard Fault at address: 0x%08x\r\n", (unsigned int)ia);
-    NRF_LOG_INFO("Hard Fault at address: 0x%08x\r\n", (unsigned int)ia);
+    NRF_LOG_DEBUG("Hard Fault at address: 0x%08x\r\n", (unsigned int)ia);
     NRF_LOG_FLUSH();
     while(1)
         ;
@@ -1179,19 +1207,19 @@ static void gap_params_init(void)
 // Uninitialize SD (closes file, unmounts, uninit.. does NOT change ADP1)
 void sd_uninit() {
 
-	NRF_LOG_INFO("sd_uninit()...");
+	NRF_LOG_DEBUG("sd_uninit()...");
 
 	ff_result = f_close(&file);
 	if (ff_result) {
-		NRF_LOG_INFO("** WARNING: f_close() Failed, ff_result: %d", ff_result);
+		NRF_LOG_WARNING("** WARNING: f_close() Failed, ff_result: %d", ff_result);
 	}
 	ff_result = f_mount(0, "", 1);
 	if (ff_result) {
-		NRF_LOG_INFO("** WARNING: UNmount Failed, ff_result: %d", ff_result);
+		NRF_LOG_WARNING("** WARNING: UNmount Failed, ff_result: %d", ff_result);
 	}
 	DSTATUS disk_state = disk_uninitialize(0);
 	if (disk_state != 1) {
-		NRF_LOG_INFO("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
+		NRF_LOG_WARNING("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
 	}
 
 }
@@ -1221,16 +1249,16 @@ void sd_init() {
 
 	diskio_blockdev_register(drives, ARRAY_SIZE(drives));
 
-	NRF_LOG_INFO("Initializing disk 0 (SDC)...");
+	NRF_LOG_DEBUG("Initializing disk 0 (SDC)...");
 	for (uint32_t retries = 3; retries && disk_state; --retries)
 	{
-		NRF_LOG_INFO("--BI");
+		NRF_LOG_DEBUG("--BI");
 		disk_state = disk_initialize(0);
-		NRF_LOG_INFO("--AI");
+		NRF_LOG_DEBUG("--AI");
 	}
 	if (disk_state)
 	{
-		NRF_LOG_INFO("Disk initialization failed. disk_state: %d", disk_state);
+		NRF_LOG_DEBUG("Disk initialization failed. disk_state: %d", disk_state);
 	}
 
 }
@@ -1239,10 +1267,10 @@ void sd_init() {
 // Mounting SD
 void sd_mount() {
 
-    NRF_LOG_INFO("Mounting volume...");
+    NRF_LOG_DEBUG("Mounting volume...");
     ff_result = f_mount(&fs, "", 1);
     if (ff_result) {
-        NRF_LOG_INFO("Mount failed.");
+        NRF_LOG_DEBUG("Mount failed.");
     }
 }
 
@@ -1250,11 +1278,11 @@ void sd_mount() {
 void sd_open(char fname[], BYTE mode) {
 
     // Open SD
-//    NRF_LOG_INFO("Opening file " FILE_NAME "...");
-    NRF_LOG_INFO("Opening file: %s", fname);
+//    NRF_LOG_DEBUG("Opening file " FILE_NAME "...");
+    NRF_LOG_DEBUG("Opening file: %s", fname);
     ff_result = f_open(&file, fname, mode);
     if (ff_result != FR_OK) {
-        NRF_LOG_INFO("Unable to open or create file: %s, %d", fname, ff_result);
+        NRF_LOG_DEBUG("Unable to open or create file: %s, %d", fname, ff_result);
     }
 
 }
@@ -1266,7 +1294,7 @@ void sd_write_str(const void* buff) {
 
 	ff_result = f_write(&file, buff, strlen(buff), (UINT *) &bytes_written);
 	if (ff_result != FR_OK)	{
-		NRF_LOG_INFO("** ERROR: Write failed, ff_result: %d **.", ff_result);
+		NRF_LOG_ERROR("** ERROR: Write failed, ff_result: %d **.", ff_result);
 		// Reset the system if it's not working properly
 		sd_write_failed = true;
 		err_cnt++;
@@ -1274,7 +1302,7 @@ void sd_write_str(const void* buff) {
 
 	}
 	else {
-		NRF_LOG_INFO("%d bytes written.", bytes_written);
+		NRF_LOG_DEBUG("%d bytes written.", bytes_written);
 	}
 }
 
@@ -1287,7 +1315,7 @@ uint32_t read_SDC() {
 	ff_result = f_read(&file, sdc_buff, SDC_BUFF_SIZE, (UINT *) &bytes_read);
 //	ff_result = f_read(&file, sdc_buff, 20, (UINT *) &bytes_read);
 	if (ff_result != FR_OK)	{
-		NRF_LOG_INFO("** ERROR read_SDC(): read failed, ff_result: %d **", ff_result);
+		NRF_LOG_ERROR("** ERROR read_SDC(): read failed, ff_result: %d **", ff_result);
 		return ff_result;
 	}
 
@@ -1301,9 +1329,9 @@ uint32_t read_SDC() {
 void save_data(void) {
 
     // SD card TODO: add error code checking and err_cnt++
-	NRF_LOG_INFO("");
-    NRF_LOG_INFO("Testing SD Card...");
-	NRF_LOG_INFO("------------------");
+	NRF_LOG_DEBUG("");
+    NRF_LOG_DEBUG("Testing SD Card...");
+	NRF_LOG_DEBUG("------------------");
     sd_init();		// TODO: check that this doesn't need to be init with the other init's
     sd_mount();
 //    sd_open();
@@ -1312,7 +1340,7 @@ void save_data(void) {
 //    // Read parts of the file
 //    sd_open(FA_READ | FA_WRITE);
 //    read_SDC();
-//    NRF_LOG_INFO("sdc_buff: %s", sdc_buff);
+//    NRF_LOG_DEBUG("sdc_buff: %s", sdc_buff);
 //    f_close(&file);
 
 
@@ -1325,7 +1353,7 @@ void save_data(void) {
     }
 
     char out_str[MAX_OUT_STR_SIZE];
-//	NRF_LOG_INFO("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
+//	NRF_LOG_DEBUG("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
 	NRF_LOG_FLUSH();
 //    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 //    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
@@ -1339,10 +1367,10 @@ void save_data(void) {
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
-	NRF_LOG_INFO("out_str: %s", out_str);
+	NRF_LOG_DEBUG("out_str: %s", out_str);
     // Make sure buffer was big enough and didn't spill over
     if (out_str_size > MAX_OUT_STR_SIZE) {
-    	NRF_LOG_INFO("** ERROR: out_str too big!, out_str_size=%d", out_str_size);
+    	NRF_LOG_ERROR("** ERROR: out_str too big!, out_str_size=%d", out_str_size);
     	err_cnt++;
     }
 
@@ -1352,11 +1380,11 @@ void save_data(void) {
     (void) f_close(&file);
     ff_result = f_mount(0, "", 1);
     if (ff_result) {
-    	NRF_LOG_INFO("** WARNING: UNmount Failed, ff_result: %d", ff_result);
+    	NRF_LOG_WARNING("** WARNING: UNmount Failed, ff_result: %d", ff_result);
     }
     DSTATUS disk_state = disk_uninitialize(0);
     if (disk_state != 1) {
-    	NRF_LOG_INFO("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
+    	NRF_LOG_WARNING("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
     }
 
 }
@@ -1365,7 +1393,7 @@ void save_data(void) {
 // Split up SDC into packets and keep sending
 static void send_sdc_packets() {
 
-	NRF_LOG_INFO("Initial sdc_buff_current_pos: %d", sdc_buff_current_pos);
+	NRF_LOG_DEBUG("Initial sdc_buff_current_pos: %d", sdc_buff_current_pos);
 	int cnt = 0;
 //	uint32_t bytes_remaining = 0;
 	uint16_t send_length = packet_length;
@@ -1392,21 +1420,21 @@ static void send_sdc_packets() {
 //			sd_open(BLE_TEST_FILE_NAME, FA_READ);
 
 			sdc_read_num++;
-        	NRF_LOG_INFO("--READ SDC: sdc_read_num: %d", sdc_read_num);
-        	NRF_LOG_INFO("f_tell(&file): %d", f_tell(&file));
+        	NRF_LOG_DEBUG("--READ SDC: sdc_read_num: %d", sdc_read_num);
+        	NRF_LOG_DEBUG("f_tell(&file): %d", f_tell(&file));
 			bytes_remaining = read_SDC();
 			sdc_buff_current_pos = 0;	// Reset to beginning
-			NRF_LOG_INFO("--AR");
+			NRF_LOG_DEBUG("--AR");
 
 			app_sdc_info_t const * sdc_info;
 			sdc_info = app_sdc_info_get();
-        	NRF_LOG_INFO("sdc_info->num_blocks: %d", sdc_info->num_blocks);
-        	NRF_LOG_INFO("sdc_info->block_len: %d", sdc_info->block_len);
+        	NRF_LOG_DEBUG("sdc_info->num_blocks: %d", sdc_info->num_blocks);
+        	NRF_LOG_DEBUG("sdc_info->block_len: %d", sdc_info->block_len);
 
 //			sdc_bytes_read = bytes_remaining;
-        	NRF_LOG_INFO("bytes_remaining: %d", bytes_remaining);
+        	NRF_LOG_DEBUG("bytes_remaining: %d", bytes_remaining);
     		if (bytes_remaining < SDC_BUFF_SIZE) {
-            	NRF_LOG_INFO("done_reading_sdc: %d", done_reading_sdc);
+            	NRF_LOG_DEBUG("done_reading_sdc: %d", done_reading_sdc);
     			done_reading_sdc = true;
     		}
     	}
@@ -1417,8 +1445,8 @@ static void send_sdc_packets() {
 		} else {
 			send_length = packet_length;
 		}
-    	NRF_LOG_INFO("-sdc_read_num: %d", sdc_read_num);
-    	NRF_LOG_INFO("bytes_remaining: %d, packet_length: %d, send_length: %d", bytes_remaining, packet_length, send_length);
+    	NRF_LOG_DEBUG("-sdc_read_num: %d", sdc_read_num);
+    	NRF_LOG_DEBUG("bytes_remaining: %d, packet_length: %d, send_length: %d", bytes_remaining, packet_length, send_length);
 //    	nrf_delay_ms(500);
 
 		// Sending the data over BLE
@@ -1427,15 +1455,15 @@ static void send_sdc_packets() {
             err_code == NRF_ERROR_INVALID_STATE ||
             err_code == BLE_ERROR_GATTS_SYS_ATTR_MISSING)
         {
-        	NRF_LOG_INFO("send_sdc_packets(), err_code: %d", err_code);
-        	NRF_LOG_INFO("sdc_buff_current_pos: %d", sdc_buff_current_pos);
-        	NRF_LOG_INFO("cnt: %d", cnt);
-//        	NRF_LOG_INFO("send_sdc_packets(), %d, err_code: %d", NRF_ERROR_RESOURCES, err_code);
+        	NRF_LOG_DEBUG("send_sdc_packets(), err_code: %d", err_code);
+        	NRF_LOG_DEBUG("sdc_buff_current_pos: %d", sdc_buff_current_pos);
+        	NRF_LOG_DEBUG("cnt: %d", cnt);
+//        	NRF_LOG_DEBUG("send_sdc_packets(), %d, err_code: %d", NRF_ERROR_RESOURCES, err_code);
             break;
         }
         else if (err_code != NRF_SUCCESS)
         {
-        	NRF_LOG_INFO("** ERROR send_sdc_packets(), err_code: %d", err_code);
+        	NRF_LOG_ERROR("** ERROR send_sdc_packets(), err_code: %d", err_code);
             APP_ERROR_HANDLER(err_code);
         } else {
         	// If successfully sent, update position for next one
@@ -1447,7 +1475,7 @@ static void send_sdc_packets() {
 			if (done_reading_sdc && (bytes_remaining == 0) ) {
 				done_sending_sdc = true;
 //				start_sending_sdc_data = false;
-	        	NRF_LOG_INFO("Final cnt: %d", cnt);
+	        	NRF_LOG_DEBUG("Final cnt: %d", cnt);
 
 	        	// Uninitialize here, since done with SDC
 	        	sd_uninit();
@@ -1472,7 +1500,7 @@ static void send_sdc_packets() {
 // Set up SD card and start sending data over BLE
 static void send_sdc_data() {
 
-	NRF_LOG_INFO("--ENTERED send_sdc_data()");
+	NRF_LOG_DEBUG("--ENTERED send_sdc_data()");
 
 	// reset flag so that it doesn't try to send again every time it wakes up
 	start_sending_sdc_data = false;
@@ -1536,10 +1564,10 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
     }
 
     if (p_evt->type == BLE_NUS_EVT_TX_RDY) {
-//    	NRF_LOG_INFO("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
+//    	NRF_LOG_DEBUG("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
 //		if (resending_packets) {
 		if (!done_sending_sdc) {
-	    	NRF_LOG_INFO("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
+	    	NRF_LOG_DEBUG("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
 			send_sdc_packets();
 //				send_sdc_data();
 		}
@@ -1575,7 +1603,7 @@ static void services_init(void)
     // Sensen Service
     custom_service_init(&m_SS_service, BLE_UUID_SENSEN_SERVICE);
     custom_char_add(&m_SS_service, BLE_UUID_FW_VER_CHARACTERISTIC,			&m_SS_service.fw_ver_handles, 		(uint8_t *) &sensen_FW_version, 	sizeof(sensen_FW_version),		1,0,	0);
-    custom_char_add(&m_SS_service, BLE_UUID_IS_LOGGING_CHARACTERISTIC,		&m_SS_service.is_logging_handles, 	(uint8_t *) &is_logging, 			sizeof(is_logging),				0,1,	0);
+    custom_char_add(&m_SS_service, BLE_UUID_ON_LOGGING_CHARACTERISTIC,		&m_SS_service.on_logging_handles, 	(uint8_t *) &on_logging, 			sizeof(on_logging),				0,1,	0);
     custom_char_add(&m_SS_service, BLE_UUID_LOG_INTERVAL_CHARACTERISTIC,	&m_SS_service.log_rate_handles, 	(uint8_t *) &log_interval, 			sizeof(log_interval),			0,1,	0);
     custom_char_add(&m_SS_service, BLE_UUID_BATT_PERCENT_CHARACTERISTIC,	&m_SS_service.batt_percent_handles, (uint8_t *) &fuel_percent, 			sizeof(fuel_percent),			1,0,	0);
     custom_char_add(&m_SS_service, BLE_UUID_MIN_BATT_CHARACTERISTIC,		&m_SS_service.min_batt_handles, 	(uint8_t *) &min_battery_level, 	sizeof(min_battery_level),		0,1,	0);
@@ -1670,7 +1698,7 @@ static void conn_params_init(void)
 static void sleep_mode_enter(void)
 {
 	// SHOULD ONLY BE HERE IF ADVERTISING TURNED OFF
-    NRF_LOG_INFO("** WARNING: In sleep_mode_enter(). SHOULD NOT BE HERE");
+	NRF_LOG_WARNING("** WARNING: In sleep_mode_enter(). SHOULD NOT BE HERE");
 
     uint32_t err_code = bsp_indication_set(BSP_INDICATE_IDLE);
     APP_ERROR_CHECK(err_code);
@@ -1715,6 +1743,31 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
 
 
 
+// Starts all of the sensor measurements
+static void start_measurements(uint32_t temp_log_interval) {
+	// Start the loop timer to trigger measurements
+	NRF_LOG_DEBUG("In start_measurements()");
+	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(temp_log_interval), NULL);
+	APP_ERROR_CHECK(err_code);
+	is_logging = true;	// flag that we are running
+//	on_logging = true;	// flag that we are running
+//	test_all();	// Do a first measurement (otherwise we have to wait a full log_interval)
+	meas_loop_wait_done = true;
+}
+
+// Stop all of the sensor measurements
+static void stop_measurements() {
+	// Start the loop timer to trigger measurements
+	NRF_LOG_DEBUG("In stop_measurements()");
+	err_code = app_timer_stop(meas_loop_timer);
+	APP_ERROR_CHECK(err_code);
+	is_logging = false;	// flag that we have stopped running
+//	on_logging = false;	// flag that we have stopped running
+}
+
+
+
+
 // Event Handler for when GATT is written
 static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const * p_ble_evt)
 {
@@ -1726,7 +1779,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	rx_data.offset = 0;
 	rx_data.p_value = (uint8_t*)&data_buffer;
 
-	static bool timer_running = false;
+	static bool using_live_stream_interval = false;
 
 //	NRF_LOG_DEBUG("p_our_service: %d", p_our_service);
 //	NRF_LOG_DEBUG("&m_SS_service: %d", &m_SS_service);
@@ -1734,10 +1787,61 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 //	NRF_LOG_DEBUG("&m_HAP_service: %d", &m_HAP_service);
 
 
+	/**
+	 * Sensen Services
+	 */
+	// For turning on Logging
+	if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->on_logging_handles.value_handle) {
+
+		NRF_LOG_DEBUG("on_logging: %d", on_logging);
+		NRF_LOG_DEBUG("is_logging: %d", is_logging);
+//		if (on_logging > 1) NRF_LOG_WARNING("on_logging > 1: %d", on_logging);
+
+		if (on_logging && !is_logging) {	// wants state change: turn on
+			start_measurements(log_interval);
+		} else if (!on_logging && is_logging) {	// wants state change: turn off
+			stop_measurements();
+		}
+
+		NRF_LOG_DEBUG("AS on_logging: %d", on_logging);
+		NRF_LOG_DEBUG("AS is_logging: %d", is_logging);
+
+		// Writing a new Log Interval
+		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->log_rate_handles.value_handle) {
+
+			NRF_LOG_DEBUG("log_interval: %d", log_interval);
+
+			// Need to stop and restart the timer
+			if (is_logging) {
+				stop_measurements();
+			}
+			start_measurements(log_interval);	// Restarted with the updated log_interval value
+
+		// Setting the RTC to a user defined time
+		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rtc_handles.value_handle) {
+
+			NRF_LOG_DEBUG("time_to_be_set: %d", time_to_be_set);
+			setting_new_time = true;	// set flag, handle it later whe reading RTC
+
+//			// TWI (I2C) init
+//		    twi_init();
+//
+//		    struct tm * p_tm;
+//		    p_tm = gmtime(&time_to_be_set);
+//		    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
+//
+//			// TWI (I2C) UNinit
+//		    nrf_drv_twi_uninit(&m_twi);
+
+
+
+	/**
+	 * Sensor Live Stream values using CCCD enables
+	 */
 	// Plantower PM2_5
-	if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->pm2_5_handles.cccd_handle) {
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->pm2_5_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->pm2_5_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->pm2_5_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->pm2_5_handles.is_enabled = true;
@@ -1745,11 +1849,11 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		} else if(data_buffer == 0x0000) {
 			p_our_service->pm2_5_handles.is_enabled = false;
 			NRF_LOG_DEBUG("p_our_service->pm2_5_handles.is_enabled: %d", p_our_service->pm2_5_handles.is_enabled);
-		}
+			}
 	// Plantower PM10
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->pm10_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->pm10_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->pm10_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->pm10_handles.is_enabled = true;
@@ -1761,7 +1865,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// Spec CO
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->co_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->co_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->co_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->co_handles.is_enabled = true;
@@ -1773,7 +1877,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// Figaro CO2
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->co2_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->co2_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->co2_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->co2_handles.is_enabled = true;
@@ -1785,7 +1889,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// BME Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_bme_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->temp_bme_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->temp_bme_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->temp_bme_handles.is_enabled = true;
@@ -1797,7 +1901,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// RTC Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_rtc_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->temp_rtc_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->temp_rtc_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->temp_rtc_handles.is_enabled = true;
@@ -1809,7 +1913,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// nRF Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_nrf_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->temp_nrf_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->temp_nrf_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->temp_nrf_handles.is_enabled = true;
@@ -1821,7 +1925,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// BME Humidity
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rh_handles.cccd_handle) {
 		// Get data
-		sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->rh_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->rh_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->rh_handles.is_enabled = true;
@@ -1835,7 +1939,8 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 
 	// Check if anything is enabled
-	bool something_enabled = (
+//	bool something_is_enabled = (
+	is_live_streaming = (
 			p_our_service->pm2_5_handles.is_enabled ||
 			p_our_service->pm10_handles.is_enabled ||
 			p_our_service->co_handles.is_enabled ||
@@ -1846,14 +1951,24 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 			p_our_service->rh_handles.is_enabled
 			);
 
-	// Start timer if we haven't yet
-	if (!timer_running && something_enabled) {
-		app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(OUR_CHAR_TIMER_INTERVAL), NULL);
-		timer_running = true;
-	// Or stop timer if nothing is enabled
-	} else if (timer_running && !something_enabled) {
-		app_timer_stop(m_our_char_timer_id);
-		timer_running = false;
+	// Temporarily change the logging interval faster
+	if (!using_live_stream_interval && is_live_streaming) {
+//		app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
+//		using_live_stream_interval = true;
+
+		using_live_stream_interval = true;
+		stop_measurements();
+		start_measurements(LIVE_STREAM_LOG_INTERVAL);
+
+	// Restore to original logging interval
+	} else if (using_live_stream_interval && !is_live_streaming) {
+//		app_timer_stop(m_our_char_timer_id);
+//		using_live_stream_interval = false;
+
+		using_live_stream_interval = false;
+		stop_measurements();
+		start_measurements(log_interval);
+
 	}
 
 
@@ -1872,7 +1987,7 @@ void ble_custom_service_ble_evt_handler(ble_custom_service_t * p_our_service, bl
             p_our_service->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
 
             // When connected; start our timer to start regular temperature measurements
-//            app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(OUR_CHAR_TIMER_INTERVAL), NULL);
+//            app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(LIVE_STREAM_UPDATE_INTERVAL), NULL);
 
             break;
         case BLE_GAP_EVT_DISCONNECTED:
@@ -1888,48 +2003,6 @@ void ble_custom_service_ble_evt_handler(ble_custom_service_t * p_our_service, bl
     }
 }
 
-//// Event Handler for custom sensen service
-//void ble_SUM_service_ble_evt_handler(ble_custom_service_t * p_our_service, ble_evt_t const * p_ble_evt)
-//{
-//    // OUR_JOB: Step 3.D Implement switch case handling BLE events related to our service.
-//    switch (p_ble_evt->header.evt_id)
-//    {
-//        case BLE_GATTS_EVT_WRITE:
-////            on_ble_write(p_our_service, p_ble_evt);
-//            break;
-//        case BLE_GAP_EVT_CONNECTED:
-//            p_our_service->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-//            break;
-//        case BLE_GAP_EVT_DISCONNECTED:
-//            p_our_service->conn_handle = BLE_CONN_HANDLE_INVALID;
-//            break;
-//        default:
-//            // No implementation needed.
-//            break;
-//    }
-//}
-//
-//// Event Handler for custom sensen service
-//void ble_HAP_service_ble_evt_handler(ble_custom_service_t * p_our_service, ble_evt_t const * p_ble_evt)
-//{
-//    // OUR_JOB: Step 3.D Implement switch case handling BLE events related to our service.
-//    switch (p_ble_evt->header.evt_id)
-//    {
-//        case BLE_GATTS_EVT_WRITE:
-////            on_ble_write(p_our_service, p_ble_evt);
-//            break;
-//        case BLE_GAP_EVT_CONNECTED:
-//            p_our_service->conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-//            break;
-//        case BLE_GAP_EVT_DISCONNECTED:
-//            p_our_service->conn_handle = BLE_CONN_HANDLE_INVALID;
-//            break;
-//        default:
-//            // No implementation needed.
-//            break;
-//    }
-//}
-
 
 /**@brief Function for handling BLE events.
  *
@@ -1943,25 +2016,25 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     switch (p_ble_evt->header.evt_id)
     {
 //		case BLE_GATTS_EVT_HVN_TX_COMPLETE :
-////			NRF_LOG_INFO("ble_evt_handler(): BLE_GATTS_EVT_HVN_TX_COMPLETE");
-////			NRF_LOG_INFO("resending_packets: %d, done_reading_sdc: %d", resending_packets, done_reading_sdc);
+////			NRF_LOG_DEBUG("ble_evt_handler(): BLE_GATTS_EVT_HVN_TX_COMPLETE");
+////			NRF_LOG_DEBUG("resending_packets: %d, done_reading_sdc: %d", resending_packets, done_reading_sdc);
 ////			if (resending_packets) {
 //			if (!done_sending_sdc) {
-//				NRF_LOG_INFO("ble_evt_handler(): BLE_GATTS_EVT_HVN_TX_COMPLETE");
+//				NRF_LOG_DEBUG("ble_evt_handler(): BLE_GATTS_EVT_HVN_TX_COMPLETE");
 //				send_sdc_packets();
 ////				send_sdc_data();
 //			}
 //			break;
 
         case BLE_GAP_EVT_CONNECTED:
-            NRF_LOG_INFO("Connected");
+            NRF_LOG_DEBUG("Connected");
             err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             APP_ERROR_CHECK(err_code);
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
-            NRF_LOG_INFO("Disconnected");
+            NRF_LOG_DEBUG("Disconnected");
             // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             break;
@@ -2103,7 +2176,7 @@ void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
     if ((m_conn_handle == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
     {
         m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
-        NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+        NRF_LOG_DEBUG("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
     }
     NRF_LOG_DEBUG("ATT MTU exchange completed. central 0x%x peripheral 0x%x",
                   p_gatt->att_mtu_desired_central,
@@ -2193,7 +2266,7 @@ static void advertising_init(void)
 
     init.config.ble_adv_fast_enabled  = true;
     init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
-//    NRF_LOG_INFO("APP_ADV_INTERVAL: %d", APP_ADV_INTERVAL);
+//    NRF_LOG_DEBUG("APP_ADV_INTERVAL: %d", APP_ADV_INTERVAL);
     init.config.ble_adv_fast_timeout  = APP_ADV_TIMEOUT_IN_SECONDS;
 
 //    init.config.ble_adv_slow_enabled  = true;
@@ -2251,10 +2324,10 @@ static void power_manage(void)
 	 NVIC_ClearPendingIRQ(FPU_IRQn);
 	#endif
 
-//     NRF_LOG_INFO("Entering sd_app_evt_wait()");
+//     NRF_LOG_DEBUG("Entering sd_app_evt_wait()");
     err_code = sd_app_evt_wait();
     if (err_code) {
-        NRF_LOG_INFO("power_manage(), err_code: %d", err_code);
+        NRF_LOG_DEBUG("power_manage(), err_code: %d", err_code);
     }
     APP_ERROR_CHECK(err_code);
 }
@@ -2287,9 +2360,9 @@ void wdt_event_handler(void)
 void wdt_init(void) {
 
     // Setup Watchdog Timer
-	NRF_LOG_INFO("Start Watchdog Timer...");
-	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
-	NRF_LOG_INFO("WDT_TIMEOUT_SLEEP: %d", WDT_TIMEOUT_SLEEP);
+	NRF_LOG_DEBUG("Start Watchdog Timer...");
+	NRF_LOG_DEBUG("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
+//	NRF_LOG_DEBUG("WDT_TIMEOUT_SLEEP: %d", WDT_TIMEOUT_SLEEP);
 //	if (!nrf_drv_clock_init_check() ) {
 //		err_code = nrf_drv_clock_init();
 //		NRF_LOG_DEBUG("nrf_drv_clock_init() err_code: %d", err_code);
@@ -2390,23 +2463,23 @@ int hpm_cmd_and_ack(char cmd[]) {
 //	ret_code_t err_code;
     size_t serial_bytes_written = 0;
 //    size_t serial_bytes_read;
-	NRF_LOG_INFO("--1A");
+	NRF_LOG_DEBUG("--1A");
 
     // Sending the cmd
     err_code = nrf_serial_write(&serial_uart, cmd, HPM_CMD_LEN, &serial_bytes_written, HPM_SERIAL_TIMEOUT);
     APP_ERROR_CHECK(err_code);
-    NRF_LOG_INFO("serial_bytes_written: %d", serial_bytes_written);
+    NRF_LOG_DEBUG("serial_bytes_written: %d", serial_bytes_written);
 
 
 //    // Check if the HPM acknowledged
     char hpm_ack_rx[2] = {0x0, 0x0 };
 	size_t serial_bytes_read;
     err_code = nrf_serial_read(&serial_uart, hpm_ack_rx, sizeof(hpm_ack_rx), &serial_bytes_read, HPM_SERIAL_TIMEOUT);
-    NRF_LOG_INFO("hpm_ack_rx: 0x%x, 0x%x", hpm_ack_rx[0], hpm_ack_rx[1]);
-    NRF_LOG_INFO("err_code: %d", err_code);
+    NRF_LOG_DEBUG("hpm_ack_rx: 0x%x, 0x%x", hpm_ack_rx[0], hpm_ack_rx[1]);
+    NRF_LOG_DEBUG("err_code: %d", err_code);
     APP_ERROR_CHECK(err_code);
 
-    NRF_LOG_INFO("hpm_ack_rx: 0x%x, 0x%x", hpm_ack_rx[0], hpm_ack_rx[1]);
+    NRF_LOG_DEBUG("hpm_ack_rx: 0x%x, 0x%x", hpm_ack_rx[0], hpm_ack_rx[1]);
 
     // TODO: make this check if 0xA5A5 was received, also check bytes read/written match
     return err_code;
@@ -2426,29 +2499,29 @@ int hpm_read_meas() {
 
 		// Clear the RX from previous
 		err_code = nrf_serial_rx_drain(&serial_uart);
-		NRF_LOG_INFO("err_code: %d", hpm_read_meas_cmd);
+		NRF_LOG_DEBUG("err_code: %d", hpm_read_meas_cmd);
 	    APP_ERROR_CHECK(err_code);
 
 		// Sending the read_meas command
-		NRF_LOG_INFO("hpm_read_meas_cmd: 0x%x", hpm_read_meas_cmd);
+		NRF_LOG_DEBUG("hpm_read_meas_cmd: 0x%x", hpm_read_meas_cmd);
 		err_code = nrf_serial_write(&serial_uart, hpm_read_meas_cmd, HPM_CMD_LEN, &serial_bytes_written, HPM_SERIAL_TIMEOUT);
 		APP_ERROR_CHECK(err_code);
 
 	    for(int i = 0; i < HPM_BUFF_SIZE; i++) {
 
-	        NRF_LOG_INFO("i: %d", i);
+	        NRF_LOG_DEBUG("i: %d", i);
 			err_code = nrf_serial_read(&serial_uart, &hpm_buff[i], sizeof(char), &serial_bytes_read, HPM_SERIAL_TIMEOUT);
-	        NRF_LOG_INFO("err_code: %d", err_code);
+	        NRF_LOG_DEBUG("err_code: %d", err_code);
 			APP_ERROR_CHECK(err_code);
-	        NRF_LOG_INFO("0x%x", hpm_buff[i]);
+	        NRF_LOG_DEBUG("0x%x", hpm_buff[i]);
 	    }
 		APP_ERROR_CHECK(err_code);
 
 		// calc values
 		hpm_2_5_value = 256*hpm_buff[3] + hpm_buff[4];
 		hpm_10_value = 256*hpm_buff[5] + hpm_buff[6];
-		NRF_LOG_INFO("hpm_2_5_value: %d", hpm_2_5_value);
-		NRF_LOG_INFO("hpm_10_value: %d", hpm_10_value);
+		NRF_LOG_DEBUG("hpm_2_5_value: %d", hpm_2_5_value);
+		NRF_LOG_DEBUG("hpm_10_value: %d", hpm_10_value);
 
 		// calc checksum
 		int checksum_calc = 0;
@@ -2456,20 +2529,20 @@ int hpm_read_meas() {
 			checksum_calc += hpm_buff[i];
 		}
 		checksum_calc = (65536 - checksum_calc) % 256;
-	    NRF_LOG_INFO("checksum_calc: 0x%x", checksum_calc);
+	    NRF_LOG_DEBUG("checksum_calc: 0x%x", checksum_calc);
 
 		// TODO: make this return a proper success code
 		if (checksum_calc == hpm_buff[HPM_BUFF_SIZE - 1]) {
 			return 0;
 		} else {
-			NRF_LOG_INFO("HPM checksum ERROR!");
+			NRF_LOG_DEBUG("HPM checksum ERROR!");
 			return 1;
 		}
     }
 
     // Reading using HPM's Autosend
     else {
-		NRF_LOG_INFO("USING AUTOSEND");
+		NRF_LOG_DEBUG("USING AUTOSEND");
 
 		//TODO: use a static char[] and memset to clear each time (be careful memset does same size)
 		char hpm_buff[HPM_BUFF_SIZE];		// this initializes everything as 0 (first one is 0, then fills remainder with 0)
@@ -2495,7 +2568,7 @@ int hpm_read_meas() {
 				}
 			} else {
 				// Keep looking for header
-				NRF_LOG_INFO("HAVEN'T FOUND HEADER YET..");
+				NRF_LOG_DEBUG("HAVEN'T FOUND HEADER YET..");
 
 			}
 
@@ -2503,19 +2576,19 @@ int hpm_read_meas() {
 
 		// If we found the header, read the rest
 		if (found_header) {
-			NRF_LOG_INFO("FOUND HEADER..");
+			NRF_LOG_DEBUG("FOUND HEADER..");
 
 			err_code = nrf_serial_read(&serial_uart, &hpm_buff[2], HPM_BUFF_SIZE - 2, &serial_bytes_read, HPM_SERIAL_TIMEOUT);
 			// If it timed out, return and handle it there TODO: make this more robust
-			NRF_LOG_INFO("err_code: %d", err_code);
+			NRF_LOG_DEBUG("err_code: %d", err_code);
 			if (err_code == NRF_ERROR_TIMEOUT) return err_code;
 			APP_ERROR_CHECK(err_code);
 
 			// calc values
 			hpm_2_5_value = 256*hpm_buff[6] + hpm_buff[7];
 			hpm_10_value = 256*hpm_buff[8] + hpm_buff[9];
-			NRF_LOG_INFO("hpm_2_5_value: %d", hpm_2_5_value);
-			NRF_LOG_INFO("hpm_10_value: %d", hpm_10_value);
+			NRF_LOG_DEBUG("hpm_2_5_value: %d", hpm_2_5_value);
+			NRF_LOG_DEBUG("hpm_10_value: %d", hpm_10_value);
 
 			// calc checksum
 			int checksum_calc = 0;
@@ -2528,11 +2601,11 @@ int hpm_read_meas() {
 			if (checksum_calc == checksum_value) {
 				return 0;
 			} else {
-				NRF_LOG_INFO("** ERROR: HPM checksum ERROR! **");
+				NRF_LOG_ERROR("** ERROR: HPM checksum ERROR! **");
 				return 2;
 			}
 		} else {
-			NRF_LOG_INFO("** ERROR: HPM never found Header! **");
+			NRF_LOG_ERROR("** ERROR: HPM never found Header! **");
 			return 1;
 		}
     }
@@ -2559,7 +2632,7 @@ void saadc_callback(nrf_drv_saadc_evt_t const * p_event)
 
         for (int i = 0; i < SAMPLES_IN_BUFFER; i++)
         {
-            NRF_LOG_INFO("saadc_callback (should NOT be here): %d", p_event->data.done.p_buffer[i]);
+            NRF_LOG_DEBUG("saadc_callback (should NOT be here): %d", p_event->data.done.p_buffer[i]);
         }
 
     }
@@ -2573,8 +2646,8 @@ void saadc_init(void)
 	adc_to_V = 1.0f / ((ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1) );
 	adc_to_mV = 1000 * 1.0f / ((ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1) );
 	V_to_adc_1000 = 1000*(ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1);
-	NRF_LOG_INFO("V_to_adc_1000: %d", V_to_adc_1000);
-//	NRF_LOG_INFO("adc_to_V: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V));
+	NRF_LOG_DEBUG("V_to_adc_1000: %d", V_to_adc_1000);
+//	NRF_LOG_DEBUG("adc_to_V: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V));
 
 //    ret_code_t err_code;
     err_code = nrf_drv_saadc_init(NULL, saadc_callback);
@@ -2922,7 +2995,7 @@ static ret_code_t read_rtc()
 	err_code = nrf_drv_twi_rx(&m_twi, rtc_addr, &readreg, 1);
     APP_ERROR_CHECK(err_code);
     uint8_t is_running = !(readreg>>7);		// TODO: add a check and correction action here
-    NRF_LOG_INFO("is_running: %d", is_running );
+    NRF_LOG_DEBUG("is_running: %d", is_running );
 
     // Check another register that the change was made
     regt = 0x0e;
@@ -2993,7 +3066,7 @@ static ret_code_t read_rtc()
     t.tm_isdst = 0;        // Is DST on? 1 = yes, 0 = no, -1 = unknown
     time_now = mktime(&t);
 
-    NRF_LOG_INFO("sizeof(time_now): %d", sizeof(time_now));
+    NRF_LOG_DEBUG("sizeof(time_now): %d", sizeof(time_now));
 
     // Convert the temp and store
     int8_t temp3232a = rtc_temp_buff[0];	// signed int for integer portion of temp
@@ -3025,10 +3098,10 @@ static ret_code_t read_rtc()
 //    nrf_drv_twi_enable(&m_twi);		// for saving power
 //
 //    // Get battery voltage
-//	NRF_LOG_INFO("--Q1");
+//	NRF_LOG_DEBUG("--Q1");
 //    err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
 //    if (err_code) {	// handle error outside
-//    	NRF_LOG_INFO("** WARNING in fuel_gauge_quick_start(), err_code: %d **", err_code);
+//    	NRF_LOG_DEBUG("** WARNING in fuel_gauge_quick_start(), err_code: %d **", err_code);
 //    	return err_code;
 //    }
 ////    APP_ERROR_CHECK(err_code);
@@ -3054,7 +3127,7 @@ static ret_code_t fuel_gauge_sleep() {
     // Get battery voltage
     err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
     if (err_code) {	// handle error outside
-    	NRF_LOG_INFO("** WARNING in fuel_gauge_sleep(), err_code: %d **", err_code);
+    	NRF_LOG_WARNING("** WARNING in fuel_gauge_sleep(), err_code: %d **", err_code);
     	return err_code;
     }
 //    APP_ERROR_CHECK(err_code);
@@ -3079,7 +3152,7 @@ static ret_code_t fuel_gauge_wake() {
     // Get battery voltage
     err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, cmd, 3, false);
     if (err_code) {	// handle error outside
-    	NRF_LOG_INFO("** WARNING in fuel_gauge_wake(), err_code: %d **", err_code);
+    	NRF_LOG_WARNING("** WARNING in fuel_gauge_wake(), err_code: %d **", err_code);
     	return err_code;
     }
 //    APP_ERROR_CHECK(err_code);
@@ -3102,7 +3175,7 @@ static ret_code_t read_fuel_gauge() {
     regt = 0x02;
     err_code = nrf_drv_twi_tx(&m_twi, fuel_addr, &regt, 1, true);
     if (err_code) {	// handle error outside
-    	NRF_LOG_INFO("** WARNING in read_fuel_gauge(), err_code: %d **", err_code);
+    	NRF_LOG_WARNING("** WARNING in read_fuel_gauge(), err_code: %d **", err_code);
     	return err_code;
     }
 //    APP_ERROR_CHECK(err_code);
@@ -3120,13 +3193,13 @@ static ret_code_t read_fuel_gauge() {
     APP_ERROR_CHECK(err_code);
     // Convert and save
     fuel_percent_raw = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
-	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
-	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
-//	NRF_LOG_INFO("fuel_percent_raw = %d", fuel_percent_raw);
+	NRF_LOG_DEBUG("cmd[0] = 0x%x", cmd[0]);
+	NRF_LOG_DEBUG("cmd[1] = 0x%x", cmd[1]);
+//	NRF_LOG_DEBUG("fuel_percent_raw = %d", fuel_percent_raw);
 	fuel_percent_raw = fuel_percent_raw/256.0 * 1000;	// convert to float, but leave 3 decimal places
 ////    fuel_percent_raw = fuel_percent_raw * (1000.0/256.0);	// convert to float, but leave 3 decimal places
-//	NRF_LOG_INFO("fuel_percent_raw = %d", fuel_percent_raw);
-//	NRF_LOG_INFO("cmd[0]*1000 + cmd[1]*(1000.0/256.0) = %d", cmd[0]*1000 + cmd[1]*(1000.0/256.0) );
+//	NRF_LOG_DEBUG("fuel_percent_raw = %d", fuel_percent_raw);
+//	NRF_LOG_DEBUG("cmd[0]*1000 + cmd[1]*(1000.0/256.0) = %d", cmd[0]*1000 + cmd[1]*(1000.0/256.0) );
 //	fuel_percent_raw = cmd[0]*1000 + cmd[1]*(1000.0/256.0);	// Need *1000 for 3 decimal places, /256 to get fractional part
 
 
@@ -3142,7 +3215,7 @@ static void calc_fuel_percent() {
 
 	//	float FUEL_SCALE_FACTOR = 2.589;
 	float battery_scale_factor = battery_scale_factors[battery_type_used];
-	NRF_LOG_INFO("battery_scale_factor*1000: %d", battery_scale_factor*1000);
+	NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factor*1000);
 
 	// Only need to correct for non-standard battery
 	if (battery_type_used != BAT_LIPO_2000mAh) {
@@ -3167,13 +3240,13 @@ static void calc_fuel_percent() {
 //		if (loop_num > 1) fuel_percent_raw = 60*1000;
 //		if (loop_num > 2) fuel_percent_raw = 40*1000;
 //		if (loop_num > 3) fuel_percent_raw = 10*1000;
-//		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
+//		NRF_LOG_DEBUG("fuel_percent_raw: %d", fuel_percent_raw);
 
 
 
 		// If above the threshold, adjust the measured value differently
-		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
-		NRF_LOG_INFO("FUEL_PERCENT_THRESHOLD*1000: %d", FUEL_PERCENT_THRESHOLD*1000);
+		NRF_LOG_DEBUG("fuel_percent_raw: %d", fuel_percent_raw);
+		NRF_LOG_DEBUG("FUEL_PERCENT_THRESHOLD*1000: %d", FUEL_PERCENT_THRESHOLD*1000);
 		if (fuel_percent_raw > FUEL_PERCENT_THRESHOLD*1000) {
 			// Simple attempt: weighted averages of current and initial
 			fuel_percent = fuel_percent_raw/battery_scale_factor + (battery_scale_factor-1)*fuel_p0/battery_scale_factor;
@@ -3185,30 +3258,30 @@ static void calc_fuel_percent() {
 				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_p0) / (1.0f*100*1000));
 			}
 
-			NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
-			NRF_LOG_INFO("time_now: %d", time_now);
-			NRF_LOG_INFO("t0: %d", t0);
-			NRF_LOG_INFO("fuel_t0: %d", fuel_t0);
-			NRF_LOG_INFO("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
-			NRF_LOG_INFO("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
-			NRF_LOG_INFO("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
+			NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
+			NRF_LOG_DEBUG("time_now: %d", time_now);
+			NRF_LOG_DEBUG("t0: %d", t0);
+			NRF_LOG_DEBUG("fuel_t0: %d", fuel_t0);
+			NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
+			NRF_LOG_DEBUG("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
+			NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
 
 			if ((time_now - fuel_t0) > runtime_estimate) {	// set to 0 if already past runtime_estimate
 				fuel_percent = 0;
-				NRF_LOG_INFO("set fuel_percent to 0");
+				NRF_LOG_DEBUG("set fuel_percent to 0");
 			} else {
-//				NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
-//				NRF_LOG_INFO("time_now: %d", time_now);
-//				NRF_LOG_INFO("t0: %d", t0);
-//				NRF_LOG_INFO("fuel_t0: %d", fuel_t0);
-//				NRF_LOG_INFO("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
-//				NRF_LOG_INFO("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
-//				NRF_LOG_INFO("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
+//				NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
+//				NRF_LOG_DEBUG("time_now: %d", time_now);
+//				NRF_LOG_DEBUG("t0: %d", t0);
+//				NRF_LOG_DEBUG("fuel_t0: %d", fuel_t0);
+//				NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
+//				NRF_LOG_DEBUG("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
+//				NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
 
 				// Need to be careful.. don't lose precision (use float), and don't overflow int (break into 2 calcs)
 				float temp = (runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate);	// % of runtime estimate.  Calc separately to avoid uint32 overflow
-				NRF_LOG_INFO("temp*1000: %d", temp*1000);
-				NRF_LOG_INFO("temp: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(temp));
+				NRF_LOG_DEBUG("temp*1000: %d", temp*1000);
+				NRF_LOG_DEBUG("temp: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(temp));
 				fuel_percent = 1000 * 100*temp;	// 100x b/c %, 1000x for 3 decimal places
 			}
 		}
@@ -3233,7 +3306,7 @@ static ret_code_t UV_SI1145_init() {
     uint8_t cmd0[] = {regt, 0x29, 0x89, 0x02, 0x00	};
     err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, cmd0, 5, false);
     if (err_code) {	// handle error outside
-    	NRF_LOG_INFO("** WARNING in UV_SI1145_init(), err_code: %d **", err_code);
+    	NRF_LOG_WARNING("** WARNING in UV_SI1145_init(), err_code: %d **", err_code);
     	return err_code;
     }
 
@@ -3275,7 +3348,7 @@ static ret_code_t UV_SI1145_read() {
     regt = 0x22;	// start of VIS, then IR data
     err_code = nrf_drv_twi_tx(&m_twi, UV_SI1145_addr, &regt, 1, true);
     if (err_code) {	// handle error outside
-    	NRF_LOG_INFO("** WARNING in UV_SI1145_read(), err_code: %d **", err_code);
+    	NRF_LOG_WARNING("** WARNING in UV_SI1145_read(), err_code: %d **", err_code);
     	return err_code;
     }
 //    APP_ERROR_CHECK(err_code);
@@ -3284,10 +3357,10 @@ static ret_code_t UV_SI1145_read() {
     // Convert and save
     UV_SI1145_VIS_value = 	cmd[0] | (cmd[1] << 8);	// combine 2 bytes (MSB is 2nd)
     UV_SI1145_IR_value = 	cmd[2] | (cmd[3] << 8);	// combine 2 bytes (MSB is 2nd)
-	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
-	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
-	NRF_LOG_INFO("cmd[2] = 0x%x", cmd[2]);
-	NRF_LOG_INFO("cmd[3] = 0x%x", cmd[3]);
+	NRF_LOG_DEBUG("cmd[0] = 0x%x", cmd[0]);
+	NRF_LOG_DEBUG("cmd[1] = 0x%x", cmd[1]);
+	NRF_LOG_DEBUG("cmd[2] = 0x%x", cmd[2]);
+	NRF_LOG_DEBUG("cmd[3] = 0x%x", cmd[3]);
 
     // Read the UV data
     regt = 0x2C;	// start of UV data
@@ -3297,8 +3370,8 @@ static ret_code_t UV_SI1145_read() {
     APP_ERROR_CHECK(err_code);
     // Convert and save
     UV_SI1145_UV_value = 	cmd[0] | (cmd[1] << 8);	// combine 2 bytes (MSB is 2nd)
-	NRF_LOG_INFO("cmd[0] = 0x%x", cmd[0]);
-	NRF_LOG_INFO("cmd[1] = 0x%x", cmd[1]);
+	NRF_LOG_DEBUG("cmd[0] = 0x%x", cmd[0]);
+	NRF_LOG_DEBUG("cmd[1] = 0x%x", cmd[1]);
 
 
     nrf_drv_twi_disable(&m_twi);		// for saving power
@@ -3347,7 +3420,7 @@ static ret_code_t read_plantower_twi()
 	if (checksum_calc == checksum_value) {
 		return 0;
 	} else {
-		NRF_LOG_INFO("** ERROR: HPM checksum ERROR! **");
+		NRF_LOG_ERROR("** ERROR: HPM checksum ERROR! **");
 		return 2;
 	}
 
@@ -3374,7 +3447,7 @@ int32_t get_temp_nrf(void) {
  */
 void get_data() {
 
-//NRF_LOG_INFO("--ST");
+//NRF_LOG_DEBUG("--ST");
 //if (0) {
 
 	/** Initialize some stuff **/
@@ -3418,7 +3491,7 @@ void get_data() {
 
 		err_code = DHTLIB_ERROR_TIMEOUT;
 		for (int i=0; (err_code == DHTLIB_ERROR_TIMEOUT) && (i < DHT_RETRY_NUM); i++) {
-			NRF_LOG_INFO("Start DHT read..");
+			NRF_LOG_DEBUG("Start DHT read..");
 			err_code = dht_read();
 			if (err_code == DHTLIB_ERROR_TIMEOUT) {
 				NRF_LOG_INFO("* RETRY: DHT TIMEOUT ERROR, err_code=%d *", err_code);
@@ -3427,13 +3500,13 @@ void get_data() {
 			nrf_delay_ms(500);
 		}
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: DHT read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: DHT read, err_code=%d **", err_code);
 			dht_temp_C = 0;
 			dht_humidity = 0;
 			err_cnt++;
 			dht_error_cnt_total++;
 		} else {
-			NRF_LOG_INFO("SUCCESS: DHT READ");
+			NRF_LOG_DEBUG("SUCCESS: DHT READ");
 			dht_temp_C = dht_getCelsius();
 			dht_humidity = dht_getHumidity();
 		}
@@ -3490,7 +3563,7 @@ void get_data() {
 		}
 
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: Figaro CO2 read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: Figaro CO2 read, err_code=%d **", err_code);
 			figCO2_value = 0;
 			err_cnt++;
 			figCO2_error_cnt_total++;
@@ -3518,7 +3591,7 @@ void get_data() {
 		}
 
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: BME280 TRH read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: BME280 TRH read, err_code=%d **", err_code);
 			bme_temp_C = 0;
 			bme_humidity = 0;
 			bme_pressure = 0;
@@ -3537,14 +3610,27 @@ void get_data() {
 		NRF_LOG_INFO("Testing RTC with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------");
 
+		// Set time manually
 		if (SETTING_TIME_MANUALLY && !time_was_set) {
-			NRF_LOG_INFO("** WARNING: SETTING TIME MANUALLY **");
+			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
 			set_rtc(00, 26, 15 +4, 	5, 17, 5, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
+
+		// Set time with new BLE time that was sent
+		if (setting_new_time) {
+			NRF_LOG_INFO("setting_new_time: %d", time_to_be_set);
+
+		    struct tm * p_tm;
+		    p_tm = gmtime(&time_to_be_set);
+		    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
+
+		    setting_new_time = false;	// reset flag
+		}
+
 		err_code = 1;
 		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
 			err_code = read_rtc();
@@ -3556,7 +3642,7 @@ void get_data() {
 		}
 
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: RTC read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: RTC read, err_code=%d **", err_code);
 			time_now = 0;
 			err_cnt++;
 			rtc_error_cnt_total++;
@@ -3579,13 +3665,13 @@ void get_data() {
 		NRF_LOG_INFO("--------------");
 
 		nrf_drv_saadc_sample_convert(ADC_CHANNEL_NUM, &adc_value);
-		NRF_LOG_INFO("Sample 1: %d", adc_value);
+		NRF_LOG_DEBUG("Sample 1: %d", adc_value);
 
 		// convert to V
-//		NRF_LOG_INFO("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
-//		NRF_LOG_INFO("adc_value (mV): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V*1000));
+//		NRF_LOG_DEBUG("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
+//		NRF_LOG_DEBUG("adc_value (mV): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V*1000));
 		NRF_LOG_INFO("adc_value (mV): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*1000*1000/V_to_adc_1000));
-//		NRF_LOG_INFO("adc_value (\%): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V/MBED_VREF));
+//		NRF_LOG_DEBUG("adc_value (\%): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_value*adc_to_V/MBED_VREF));
 	//	nrf_drv_saadc_sample();		// Non-blocking function
 	}
 
@@ -3601,8 +3687,8 @@ void get_data() {
 		nrf_delay_ms(PRE_READ_WAIT);
 
 		// Turn LED on (low)
-		NRF_LOG_INFO("Sampling... (between LED stuff)");
-		NRF_LOG_INFO("Turning LED ON (low)");
+		NRF_LOG_DEBUG("Sampling... (between LED stuff)");
+		NRF_LOG_DEBUG("Turning LED ON (low)");
 	//    nrf_gpio_cfg_output(SHARP_PM_LED);
 		nrf_gpio_pin_clear(SHARP_PM_LED);
 		nrf_delay_us(280);
@@ -3614,9 +3700,9 @@ void get_data() {
 		nrf_delay_us(40);
 		nrf_gpio_pin_set(SHARP_PM_LED);
 		nrf_delay_us(9680);
-		NRF_LOG_INFO("LED turned OFF (high)");
+		NRF_LOG_DEBUG("LED turned OFF (high)");
 
-		NRF_LOG_INFO("Sample 1: %d", sharpPM_value);
+		NRF_LOG_DEBUG("Sample 1: %d", sharpPM_value);
 		NRF_LOG_INFO("sharpPM_value (mV): %d", sharpPM_value*1000*1000/V_to_adc_1000);
 	}
 
@@ -3631,7 +3717,7 @@ void get_data() {
 		nrf_drv_saadc_sample_convert(FIG_CO_CHANNEL_NUM, &figCO_value);
 		nrf_delay_ms(PRE_READ_WAIT);
 
-		NRF_LOG_INFO("Sampling...");
+		NRF_LOG_DEBUG("Sampling...");
 		nrf_drv_saadc_sample_convert(FIG_CO_CHANNEL_NUM, &figCO_value);
 		NRF_LOG_INFO("figCO_value (mV): %d", figCO_value*1000*1000/V_to_adc_1000);
 	}
@@ -3647,14 +3733,14 @@ void get_data() {
 		nrf_drv_saadc_sample_convert(BATTERY_CHANNEL_NUM, &battery_value);
 		nrf_delay_ms(PRE_READ_WAIT);
 
-		NRF_LOG_INFO("Sampling...");
+		NRF_LOG_DEBUG("Sampling...");
 		nrf_drv_saadc_sample_convert(BATTERY_CHANNEL_NUM, &battery_value);
-		NRF_LOG_INFO("V_to_adc_1000: %d", V_to_adc_1000);
-//		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
+		NRF_LOG_DEBUG("V_to_adc_1000: %d", V_to_adc_1000);
+//		NRF_LOG_DEBUG("battery_value (mV): %d", battery_value*adc_to_V*1000);
 		NRF_LOG_INFO("battery_value (mV): %d", battery_value*1000*1000/V_to_adc_1000);
-//		NRF_LOG_INFO("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
+//		NRF_LOG_DEBUG("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
 //		adc_to_V = 1.0f / ((ADC_GAIN_VALUE / ADC_REFERENCE_VOLTAGE) * (pow(2, ADC_RESOLUTION_BITS)-1) );
-//		NRF_LOG_INFO("battery_value (mV): %d", battery_value*adc_to_V*1000);
+//		NRF_LOG_DEBUG("battery_value (mV): %d", battery_value*adc_to_V*1000);
 	}
 
 
@@ -3682,7 +3768,7 @@ void get_data() {
 		}
 
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: Fuel Gauge read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: Fuel Gauge read, err_code=%d **", err_code);
 			fuel_v_cell = 0;
 			fuel_percent = 0;
 			fuel_percent_raw = 0;
@@ -3693,7 +3779,7 @@ void get_data() {
 		}
 
 		// Read Fuel
-		NRF_LOG_INFO("battery_scale_factor*1000: %d", battery_scale_factors[battery_type_used]*1000);
+		NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factors[battery_type_used]*1000);
 		NRF_LOG_INFO("fuel_v_cell: %d", fuel_v_cell);
 		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
 		NRF_LOG_INFO("fuel_percent: %d", fuel_percent);
@@ -3718,7 +3804,7 @@ void get_data() {
 		NRF_LOG_INFO("UV_SI1145_UV_value: %d", UV_SI1145_UV_value);
 	}
 
-//NRF_LOG_INFO("--ST");
+//NRF_LOG_DEBUG("--ST");
 //if (0) {
 
 	// Small Plantower, TWI (I2C)
@@ -3731,7 +3817,7 @@ void get_data() {
 		while (!plantower_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
-		NRF_LOG_INFO("--PLANTOWER WAIT DONE");
+		NRF_LOG_DEBUG("--PLANTOWER WAIT DONE");
 
 		err_code = 1;
 		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
@@ -3744,7 +3830,7 @@ void get_data() {
 		}
 
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: PLANTOWER read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: PLANTOWER read, err_code=%d **", err_code);
 			plantower_2_5_value = 0;
 			plantower_10_value = 0;
 //			// FOR TESTING, REMOVE LATER
@@ -3756,24 +3842,24 @@ void get_data() {
 
 		NRF_LOG_INFO("plantower_2_5_value = %d", plantower_2_5_value);
 		NRF_LOG_INFO("plantower_10_value = %d", plantower_10_value);
-		NRF_LOG_INFO("&plantower_2_5_value = %d", &plantower_2_5_value);
-		NRF_LOG_INFO("&plantower_10_value = %d", &plantower_10_value);
+		NRF_LOG_DEBUG("&plantower_2_5_value = %d", &plantower_2_5_value);
+		NRF_LOG_DEBUG("&plantower_10_value = %d", &plantower_10_value);
 	}
 //}	// REMOVE
 
 
 	// Uninitialize TWI/I2C (need to do this before
-	NRF_LOG_INFO("--BFGS");
+	NRF_LOG_DEBUG("--BFGS");
 	if (using_component(FUEL_GAUGE, components_used)) {
 		fuel_gauge_sleep();	// Turn off to save power
 	}
-	NRF_LOG_INFO("--AFGS");
+	NRF_LOG_DEBUG("--AFGS");
 //	// TWI (I2C) UNinit
 //    nrf_drv_twi_uninit(&m_twi);
 
 
     // ADP High Power sleep, turn OFF power to high power sensors
-	if (using_component(ADP_HIGH, components_used)) {
+	if (!is_live_streaming && using_component(ADP_HIGH, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("SLEEP, ADP_HIGH: Turning OFF ADP Power...");
 		NRF_LOG_INFO("-----------------------------------------");
@@ -3795,14 +3881,14 @@ void get_data() {
 		while (!specCO_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
-		NRF_LOG_INFO("--SPEC_CO WAIT DONE");
+		NRF_LOG_DEBUG("--SPEC_CO WAIT DONE");
 
 		// Pre-read wait, prevents garbage reading
 		nrf_saadc_value_t specCO_temp;
 		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
 		nrf_delay_ms(PRE_READ_WAIT);
 
-		NRF_LOG_INFO("Sampling...");
+		NRF_LOG_DEBUG("Sampling...");
 		int specCO_total = 0;
 		// read it a bunch of times and then average
 		for (int i = 0; i < 128; i++) {
@@ -3813,10 +3899,10 @@ void get_data() {
 		}
 
 //		specCO_value = specCO_total/128.0f;
-//		NRF_LOG_INFO("specCO_value: %d", specCO_value);
+//		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
 		specCO_value = specCO_total/128;
-		NRF_LOG_INFO("specCO_value: %d", specCO_value);
-//		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
+		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
+//		NRF_LOG_DEBUG("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
 		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*adc_to_mV);
 	}
 
@@ -3833,32 +3919,32 @@ void get_data() {
 		/** Initialize some stuff **/
 		// Serial Read setup, for HPM read. Commented sections are from example, but not sure if they're needed
 			if (!nrf_drv_clock_init_check() ) {
-				NRF_LOG_INFO("Need to initialize the clock..");
+				NRF_LOG_DEBUG("Need to initialize the clock..");
 				err_code = nrf_drv_clock_init();	// TODO: Maybe remove, unnecessary?
 				APP_ERROR_CHECK(err_code);
 			}
 			if (!nrf_drv_power_init_check() ) {
-				NRF_LOG_INFO("Need to initialize the power driver..");
+				NRF_LOG_DEBUG("Need to initialize the power driver..");
 				err_code = nrf_drv_power_init(NULL);	// TODO: Maybe remove, unnecessary?
 				APP_ERROR_CHECK(err_code);
 			}
 		nrf_drv_clock_lfclk_request(NULL);
 		err_code = app_timer_init();	// needed for serial timeout checking
-		NRF_LOG_INFO("err_code = %d", err_code);
+		NRF_LOG_DEBUG("err_code = %d", err_code);
 		APP_ERROR_CHECK(err_code);
 		err_code = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
-		NRF_LOG_INFO("err_code = %d", err_code);
+		NRF_LOG_DEBUG("err_code = %d", err_code);
 		APP_ERROR_CHECK(err_code);
 
 		// Need to send commands if not using autosend
 		if (!USING_AUTOSEND) {
 
-			NRF_LOG_INFO("Sending Command.. Disable Autosend");
+			NRF_LOG_DEBUG("Sending Command.. Disable Autosend");
 			err_code = hpm_cmd_and_ack(hpm_stop_autosend_cmd);	//stop HPM autosend
 
-			NRF_LOG_INFO("Sending Command.. Disable Autosend");
+			NRF_LOG_DEBUG("Sending Command.. Disable Autosend");
 			err_code = hpm_cmd_and_ack(hpm_stop_autosend_cmd);	//Do again, since HPM may still be autosending, which may confuse cmd_ack
-			NRF_LOG_INFO("Sending Command.. Start Measurement");
+			NRF_LOG_DEBUG("Sending Command.. Start Measurement");
 			err_code = hpm_cmd_and_ack(hpm_start_meas_cmd);	//start HPM
 		}
 
@@ -3866,27 +3952,27 @@ void get_data() {
 		err_code = NRF_ERROR_TIMEOUT;
 		for (int i=0; (err_code == NRF_ERROR_TIMEOUT) && (i < HPM_NUM_RETRIES); i++) {
 			// Try reading, and retry if timeout error.  HPM sends every 1000 ms, so make sure we try enough times
-			NRF_LOG_INFO("HPM Read, Try #%d", i);
+			NRF_LOG_DEBUG("HPM Read, Try #%d", i);
 			err_code = NRF_ERROR_TIMEOUT;
 			for (int j=0; (err_code == NRF_ERROR_TIMEOUT) && (j < (1000/HPM_SERIAL_TIMEOUT + 1)); j++) {
 				err_code = hpm_read_meas();		//read the measurement
 				if (err_code == NRF_ERROR_TIMEOUT) {
-					NRF_LOG_INFO("* RETRY: HPM TIMEOUT ERROR, err_code=%d *", err_code);
+					NRF_LOG_DEBUG("* RETRY: HPM TIMEOUT ERROR, err_code=%d *", err_code);
 					avoided_error_cnt++;
 				} else {
-					NRF_LOG_INFO("SUCCESS: HPM READ");
+					NRF_LOG_DEBUG("SUCCESS: HPM READ");
 				}
 			}
 
 			// Try the whole reading process again if it didn't work
 			if ((HPM_NUM_RETRIES > 1) && (err_code != NRF_SUCCESS)) {
 				nrf_delay_ms(HPM_RETRY_WAIT);
-				NRF_LOG_INFO("* RETRY: HPM wasn't read, err_code=%d *", err_code);
+				NRF_LOG_DEBUG("* RETRY: HPM wasn't read, err_code=%d *", err_code);
 			}
 		}
 
 		if (err_code) {
-			NRF_LOG_INFO("** ERROR: HPM read UNKNOWN ERROR, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: HPM read UNKNOWN ERROR, err_code=%d **", err_code);
 			err_cnt++;
 			hpm_error_cnt_total++;
 		}
@@ -3929,7 +4015,7 @@ int test_main() {
 	NRF_LOG_INFO("| Testing test_main() |");
 	NRF_LOG_INFO("-----------------------");
 	NRF_LOG_INFO("loop_num = %d", loop_num);
-	NRF_LOG_INFO("wdt_triggered = %d", wdt_triggered);
+	NRF_LOG_DEBUG("wdt_triggered = %d", wdt_triggered);
 
 
     // ADP, turn ON all power
@@ -3947,7 +4033,7 @@ int test_main() {
 	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
 	NRF_LOG_INFO("ADP2_PIN: HIGH.");
 	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
-	NRF_LOG_INFO("STATUS_LED: HIGH.");
+	NRF_LOG_DEBUG("STATUS_LED: HIGH.");
 
 //	nrf_delay_ms(1000);
 
@@ -3985,9 +4071,9 @@ int test_main() {
 	// Initial delay so things can settle
 	nrf_delay_ms(INITIAL_SETTLING_WAIT);
     // TWI (I2C) init
-	NRF_LOG_INFO("--BTWI");
+	NRF_LOG_DEBUG("--BTWI");
     twi_init();
-	NRF_LOG_INFO("--ATWI");
+	NRF_LOG_DEBUG("--ATWI");
 
 	// All the measurements happen here
 	err_cnt = 0;
@@ -4016,7 +4102,7 @@ int test_main() {
     nrf_drv_twi_uninit(&m_twi);
 
     // ADP sleep, turn OFF all power
-	if (using_component(ADP, components_used)) {
+	if (!is_live_streaming && using_component(ADP, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("SLEEP: Turning OFF ADP Power...");
 		NRF_LOG_INFO("-------------------------------");
@@ -4045,9 +4131,9 @@ int test_main() {
 
 			// Clear Event Register.
 			__SEV();
-	//		NRF_LOG_INFO("Woke Temporarily");
+	//		NRF_LOG_DEBUG("Woke Temporarily");
 			__WFE();
-	//		NRF_LOG_INFO("Woke Temporarily");
+	//		NRF_LOG_DEBUG("Woke Temporarily");
 		}
 	}
 
@@ -4057,10 +4143,10 @@ int test_main() {
 	NRF_LOG_INFO("Feeding the Watchdog..");
 	NRF_LOG_INFO("----------------------");
 	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
-	NRF_LOG_INFO("WDT_TIMEOUT_SLEEP: %d", WDT_TIMEOUT_SLEEP);
+//	NRF_LOG_DEBUG("WDT_TIMEOUT_SLEEP: %d", WDT_TIMEOUT_SLEEP);
 	// check if SD card failed
 	if (sd_write_failed && SD_FAIL_SHUTDOWN) {
-		NRF_LOG_INFO("** FATAL ERROR: sd_write_failed: %d **", sd_write_failed);
+		NRF_LOG_ERROR("** FATAL ERROR: sd_write_failed: %d **", sd_write_failed);
 //		NRF_LOG_FLUSH();
 		// wait until wdt runs out
 		while (1) {}
@@ -4070,16 +4156,32 @@ int test_main() {
 
     // Ending stuff
     avoided_error_cnt_total += avoided_error_cnt;
-	NRF_LOG_INFO("avoided_error_cnt = %d", avoided_error_cnt);
-	NRF_LOG_INFO("avoided_error_cnt_total = %d", avoided_error_cnt_total);
+	NRF_LOG_DEBUG("avoided_error_cnt = %d", avoided_error_cnt);
+	NRF_LOG_DEBUG("avoided_error_cnt_total = %d", avoided_error_cnt_total);
 	if (avoided_error_cnt > 0) {
-		NRF_LOG_INFO("** ERRORS AVOIDED! **");
+		NRF_LOG_DEBUG("** ERRORS AVOIDED! **");
 
 	}
 	NRF_LOG_FLUSH();
 
     loop_num++;
     return err_cnt;
+}
+
+// If the battery level is too low, stop measurements and sleep forever
+static void check_min_battery_level() {
+	if (fuel_percent < min_battery_level) {
+		NRF_LOG_INFO("fuel_percent < min_battery_level");
+		stop_measurements();
+
+		// Ensure that all ADP's are off
+		nrf_gpio_cfg_output(ADP1_PIN);
+		nrf_gpio_cfg_output(ADP2_PIN);
+		NRF_LOG_DEBUG("ALL ADP: LOW.");
+		nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH, Turn OFF ADP
+		nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH, Turn OFF ADP
+
+	}
 }
 
 
@@ -4094,57 +4196,69 @@ static void test_all()
 	err_cnt = test_main();
 	err_cnt_total += err_cnt;
 
+	// Push values to App if Live Streaming
+	if (is_live_streaming) {
+		timer_timeout_handler(NULL);
+	}
+
+	// Print out summary
 	NRF_LOG_FLUSH();
-	NRF_LOG_INFO("");
+	NRF_LOG_DEBUG("");
 	NRF_LOG_INFO("-- SUMMARY --");
 
 	NRF_LOG_INFO("log_interval = %d", log_interval);
+	NRF_LOG_INFO("min_battery_level = %d", min_battery_level);
 
-	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
-	NRF_LOG_INFO("ble_gap_address = %x", ble_gap_address.addr);
-	NRF_LOG_INFO("ble_gap_address.addr[0] = %x", ble_gap_address.addr[0]);
-	NRF_LOG_INFO("ble_gap_address.addr[1] = %x", ble_gap_address.addr[1]);
-	NRF_LOG_INFO("ble_gap_address.addr[2] = %x", ble_gap_address.addr[2]);
-	NRF_LOG_INFO("ble_gap_address.addr[3] = %x", ble_gap_address.addr[3]);
-	NRF_LOG_INFO("ble_gap_address.addr[4] = %x", ble_gap_address.addr[4]);
-	NRF_LOG_INFO("ble_gap_address.addr[5] = %x", ble_gap_address.addr[5]);
+	NRF_LOG_DEBUG("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+//	NRF_LOG_DEBUG("ble_gap_address = %x", ble_gap_address.addr);
+//	NRF_LOG_DEBUG("ble_gap_address.addr[0] = %x", ble_gap_address.addr[0]);
+//	NRF_LOG_DEBUG("ble_gap_address.addr[1] = %x", ble_gap_address.addr[1]);
+//	NRF_LOG_DEBUG("ble_gap_address.addr[2] = %x", ble_gap_address.addr[2]);
+//	NRF_LOG_DEBUG("ble_gap_address.addr[3] = %x", ble_gap_address.addr[3]);
+//	NRF_LOG_DEBUG("ble_gap_address.addr[4] = %x", ble_gap_address.addr[4]);
+//	NRF_LOG_DEBUG("ble_gap_address.addr[5] = %x", ble_gap_address.addr[5]);
 
 
 	NRF_LOG_INFO("time_now = %d", time_now);
 	NRF_LOG_INFO("err_cnt = %d", err_cnt);
 	NRF_LOG_INFO("err_cnt_total = %d", err_cnt_total);
-	NRF_LOG_INFO("dht_error_cnt_total = %d", dht_error_cnt_total);
-	NRF_LOG_INFO("hpm_error_cnt_total = %d", hpm_error_cnt_total);
-	NRF_LOG_INFO("*** test_main() COMPLETE!, next loop_num: %d ***", loop_num);
+//	NRF_LOG_DEBUG("dht_error_cnt_total = %d", dht_error_cnt_total);
+//	NRF_LOG_DEBUG("hpm_error_cnt_total = %d", hpm_error_cnt_total);
+	NRF_LOG_DEBUG("*** test_main() COMPLETE!, next loop_num: %d ***", loop_num);
 	NRF_LOG_FLUSH();
 
-	meas_loop_wait_done = 0;
+	// Final stuff to do before going back to sleep
+	meas_loop_wait_done = false;
+	check_min_battery_level();
 
 
 }
+
+
+
 
 
 // Timeout handlers for startup waits with the single shot timers
 static void meas_loop_handler(void * p_context) {
-	meas_loop_wait_done = 1;
-	NRF_LOG_INFO("meas_loop_wait_done: %d", meas_loop_wait_done);
+	meas_loop_wait_done = true;
+	NRF_LOG_DEBUG("meas_loop_wait_done: %d", meas_loop_wait_done);
 //	test_all();
 }
 static void dht_startup_handler(void * p_context) {
 	dht_startup_wait_done = 1;
-	NRF_LOG_INFO("dht_startup_wait_done: %d", dht_startup_wait_done);
+	NRF_LOG_DEBUG("dht_startup_wait_done: %d", dht_startup_wait_done);
 }
 static void plantower_startup_handler(void * p_context) {
 	plantower_startup_wait_done = 1;
-	NRF_LOG_INFO("plantower_startup_wait_done: %d", plantower_startup_wait_done);
+	NRF_LOG_DEBUG("plantower_startup_wait_done: %d", plantower_startup_wait_done);
 }
 static void specCO_startup_handler(void * p_context) {
 	specCO_startup_wait_done = 1;
-	NRF_LOG_INFO("specCO_startup_wait_done: %d", specCO_startup_wait_done);
+	NRF_LOG_DEBUG("specCO_startup_wait_done: %d", specCO_startup_wait_done);
 }
 static void hpm_startup_handler(void * p_context) {
 	hpm_startup_wait_done = 1;
-	NRF_LOG_INFO("hpm_startup_wait_done: %d", hpm_startup_wait_done);
+	NRF_LOG_DEBUG("hpm_startup_wait_done: %d", hpm_startup_wait_done);
 }
 
 
@@ -4212,21 +4326,21 @@ int main(void) {
 
     // Startup Message
     log_init();
-	NRF_LOG_INFO("");
-	NRF_LOG_INFO("-----------------");
-	NRF_LOG_INFO("| Initial Setup |");
-	NRF_LOG_INFO("-----------------");
+	NRF_LOG_DEBUG("");
+	NRF_LOG_DEBUG("-----------------");
+	NRF_LOG_DEBUG("| Initial Setup |");
+	NRF_LOG_DEBUG("-----------------");
     // Show which product we are using
 	if (PRODUCT_TYPE == SUM) {
-	    NRF_LOG_INFO("PRODUCT_TYPE: SUM");
+		NRF_LOG_INFO("PRODUCT_TYPE: SUM");
 	} else if (PRODUCT_TYPE == HAP) {
-	    NRF_LOG_INFO("PRODUCT_TYPE: HAP");
+		NRF_LOG_INFO("PRODUCT_TYPE: HAP");
 	} else if (PRODUCT_TYPE == BATTERY_TEST) {
-	    NRF_LOG_INFO("PRODUCT_TYPE: BATTERY_TEST");
+		NRF_LOG_INFO("PRODUCT_TYPE: BATTERY_TEST");
 	} else if (PRODUCT_TYPE == CUSTOM) {
-	    NRF_LOG_INFO("PRODUCT_TYPE: CUSTOM");
+		NRF_LOG_INFO("PRODUCT_TYPE: CUSTOM");
 	} else {
-		NRF_LOG_INFO("** WARNING: PRODUCT_TYPE: UNKNOWN");
+		NRF_LOG_WARNING("** WARNING: PRODUCT_TYPE: UNKNOWN");
 	}
 
 
@@ -4238,7 +4352,7 @@ int main(void) {
 	nrf_gpio_cfg_output(STATUS_LED);
 	nrf_gpio_pin_clear(STATUS_LED);	// Enable HIGH, Turn OFF LED
     // ADP, turn OFF all power: start with power off when entering loop.
-	NRF_LOG_INFO("Starting with ADP Power OFF... LOW");
+	NRF_LOG_DEBUG("Starting with ADP Power OFF... LOW");
     nrf_gpio_cfg_output(ADP1_PIN);
 	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
     nrf_gpio_cfg_output(ADP2_PIN);
@@ -4271,20 +4385,20 @@ int main(void) {
 	// Other info user cares about
 	NRF_LOG_INFO("log_interval = %d", log_interval);
 	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
-	NRF_LOG_INFO("PLANTOWER_STARTUP_WAIT_TIME = %d", PLANTOWER_STARTUP_WAIT_TIME);
-	NRF_LOG_INFO("SPEC_CO_STARTUP_WAIT_TIME = %d", SPEC_CO_STARTUP_WAIT_TIME);
-	NRF_LOG_INFO("FUEL_PERCENT_THRESHOLD = %d", FUEL_PERCENT_THRESHOLD);
-	NRF_LOG_INFO("DEVICE_NAME = %s", DEVICE_NAME);
-//	NRF_LOG_INFO("NUM_SAMPLES_PER_ON_CYCLE = %d", NUM_SAMPLES_PER_ON_CYCLE);
-//	NRF_LOG_INFO("WAIT_BETWEEN_SAMPLES = %d", WAIT_BETWEEN_SAMPLES);
-	NRF_LOG_INFO("SETTING_TIME_MANUALLY = %d", SETTING_TIME_MANUALLY);
-	NRF_LOG_INFO("SD_FAIL_SHUTDOWN = %d", SD_FAIL_SHUTDOWN);
 	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+	NRF_LOG_DEBUG("PLANTOWER_STARTUP_WAIT_TIME = %d", PLANTOWER_STARTUP_WAIT_TIME);
+	NRF_LOG_DEBUG("SPEC_CO_STARTUP_WAIT_TIME = %d", SPEC_CO_STARTUP_WAIT_TIME);
+	NRF_LOG_DEBUG("FUEL_PERCENT_THRESHOLD = %d", FUEL_PERCENT_THRESHOLD);
+	NRF_LOG_DEBUG("DEVICE_NAME = %s", DEVICE_NAME);
+//	NRF_LOG_DEBUG("NUM_SAMPLES_PER_ON_CYCLE = %d", NUM_SAMPLES_PER_ON_CYCLE);
+//	NRF_LOG_DEBUG("WAIT_BETWEEN_SAMPLES = %d", WAIT_BETWEEN_SAMPLES);
+	NRF_LOG_DEBUG("SETTING_TIME_MANUALLY = %d", SETTING_TIME_MANUALLY);
+	NRF_LOG_DEBUG("SD_FAIL_SHUTDOWN = %d", SD_FAIL_SHUTDOWN);
 	NRF_LOG_FLUSH();
 
 
 //    printf("\r\nUART Start! (printf)\r\n");
-    NRF_LOG_INFO("UART Start!");
+    NRF_LOG_DEBUG("UART Start!");
     err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
 //    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_SLOW);	// Unknown error
     APP_ERROR_CHECK(err_code);
@@ -4293,9 +4407,12 @@ int main(void) {
 	nrf_delay_ms(INITIAL_MSG_WAIT);
 
     // Start timer for main measurement loop
-	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
-	APP_ERROR_CHECK(err_code);
-	test_all();
+//	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
+//	APP_ERROR_CHECK(err_code);
+//	test_all();
+
+	// FOR TESTING, COMMENT OUT LATER (App will turn on system)
+	start_measurements(log_interval);
 
     // Enter main loop.
     for (;;)
