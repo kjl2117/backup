@@ -130,8 +130,9 @@ void twi_init (void);
 #define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, BATTERY_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
-static uint32_t log_interval = 10*1000;	// units: ms
-//static uint32_t log_interval = 1000*1000;	// units: ms
+static bool on_logging = true;	// Start with logging on or off (Also App can control this)
+//static uint32_t log_interval = 10*1000;	// units: ms
+static uint32_t log_interval = 1000*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
 //#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
@@ -498,7 +499,7 @@ APP_TIMER_DEF(specCO_startup_timer);
 static int hpm_startup_wait_done = 0;
 APP_TIMER_DEF(hpm_startup_timer);
 
-APP_TIMER_DEF(m_our_char_timer_id);
+//APP_TIMER_DEF(m_our_char_timer_id);
 
 // Pins for the custom Sensen boards
 #define TWI_SCL_PIN			27		///< 	P0.27 SCL pin.
@@ -613,12 +614,13 @@ static char HAP_FW_version[] = 		"HAP_v1.00";
 
 // Sensen Service values
 static bool is_logging = false;			// Whether we are currently logging
-static bool on_logging = false;	// Whether the App wants to turn on logging
+//static bool on_logging = false;	// Whether the App wants to turn on logging
 //static uint32_t log_interval = LOG_INTERVAL;	// units: ms
 static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
 static int32_t time_to_be_set = 0;
 static bool is_live_streaming = false;	// Used to skip stuff we don't want when live streaming
 #define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+#define APP_PUSH_RETRY_NUM			5
 
 #define DATA_OFFLOAD_PACKET_SIZE	20
 
@@ -969,7 +971,7 @@ ret_code_t custom_characteristic_update(ble_custom_service_t *p_our_service, ble
 
 // ALREADY_DONE_FOR_YOU: This is a timer event handler
 //static void timer_timeout_handler(void * p_context)
-static void timer_timeout_handler(void * p_context)
+ret_code_t timer_timeout_handler(void * p_context)
 {
 	NRF_LOG_DEBUG("In timer_timeout_handler()");
 
@@ -1000,7 +1002,7 @@ static void timer_timeout_handler(void * p_context)
 			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->pm2_5_handles, &plantower_2_5_value, sizeof(plantower_2_5_value));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
-				return;
+				return err_code;
 			} else {
 				previous_plantower_2_5_value = plantower_2_5_value;	// update previous value
 			}
@@ -1017,7 +1019,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_plantower_10_value = plantower_10_value;	// update previous value
 			}
@@ -1034,7 +1036,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_specCO_value = specCO_value;	// update previous value
 			}
@@ -1051,7 +1053,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_figCO2_value = figCO2_value;	// update previous value
 			}
@@ -1068,7 +1070,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_bme_temp_C = bme_temp_C;	// update previous value
 			}
@@ -1085,7 +1087,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_rtc_temp = rtc_temp;	// update previous value
 			}
@@ -1102,7 +1104,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_temp_nrf = temp_nrf;	// update previous value
 			}
@@ -1119,7 +1121,7 @@ static void timer_timeout_handler(void * p_context)
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
-				return;
+				return err_code;
 			} else {
 				previous_bme_humidity = bme_humidity;	// update previous value
 			}
@@ -1128,6 +1130,7 @@ static void timer_timeout_handler(void * p_context)
 
 
 	NRF_LOG_DEBUG("OUT timer_timeout_handler()");
+	return NRF_SUCCESS;
 
 }
 
@@ -1793,7 +1796,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	// For turning on Logging
 	if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->on_logging_handles.value_handle) {
 
-		NRF_LOG_DEBUG("on_logging: %d", on_logging);
+		NRF_LOG_INFO("on_logging: %d", on_logging);
 		NRF_LOG_DEBUG("is_logging: %d", is_logging);
 //		if (on_logging > 1) NRF_LOG_WARNING("on_logging > 1: %d", on_logging);
 
@@ -1806,22 +1809,24 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		NRF_LOG_DEBUG("AS on_logging: %d", on_logging);
 		NRF_LOG_DEBUG("AS is_logging: %d", is_logging);
 
-		// Writing a new Log Interval
-		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->log_rate_handles.value_handle) {
+	// Writing a new Log Interval
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->log_rate_handles.value_handle) {
 
-			NRF_LOG_DEBUG("log_interval: %d", log_interval);
+		NRF_LOG_INFO("log_interval: %d", log_interval);
 
-			// Need to stop and restart the timer
-			if (is_logging) {
-				stop_measurements();
-			}
+		// Need to stop and restart the timer
+		if (is_logging) {
+			stop_measurements();
+		}
+		if (on_logging) {
 			start_measurements(log_interval);	// Restarted with the updated log_interval value
+		}
 
-		// Setting the RTC to a user defined time
-		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rtc_handles.value_handle) {
+	// Setting the RTC to a user defined time
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rtc_handles.value_handle) {
 
-			NRF_LOG_DEBUG("time_to_be_set: %d", time_to_be_set);
-			setting_new_time = true;	// set flag, handle it later whe reading RTC
+		NRF_LOG_INFO("time_to_be_set: %d", time_to_be_set);
+		setting_new_time = true;	// set flag, handle it later whe reading RTC
 
 //			// TWI (I2C) init
 //		    twi_init();
@@ -1845,10 +1850,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->pm2_5_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->pm2_5_handles.is_enabled: %d", p_our_service->pm2_5_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->pm2_5_handles.is_enabled: %d", p_our_service->pm2_5_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->pm2_5_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->pm2_5_handles.is_enabled: %d", p_our_service->pm2_5_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->pm2_5_handles.is_enabled: %d", p_our_service->pm2_5_handles.is_enabled);
 			}
 	// Plantower PM10
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->pm10_handles.cccd_handle) {
@@ -1857,10 +1862,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->pm10_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->pm10_handles.is_enabled: %d", p_our_service->pm10_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->pm10_handles.is_enabled: %d", p_our_service->pm10_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->pm10_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->pm10_handles.is_enabled: %d", p_our_service->pm10_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->pm10_handles.is_enabled: %d", p_our_service->pm10_handles.is_enabled);
 		}
 	// Spec CO
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->co_handles.cccd_handle) {
@@ -1869,10 +1874,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->co_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->co_handles.is_enabled: %d", p_our_service->co_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->co_handles.is_enabled: %d", p_our_service->co_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->co_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->co_handles.is_enabled: %d", p_our_service->co_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->co_handles.is_enabled: %d", p_our_service->co_handles.is_enabled);
 		}
 	// Figaro CO2
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->co2_handles.cccd_handle) {
@@ -1881,10 +1886,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->co2_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->co2_handles.is_enabled: %d", p_our_service->co2_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->co2_handles.is_enabled: %d", p_our_service->co2_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->co2_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->co2_handles.is_enabled: %d", p_our_service->co2_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->co2_handles.is_enabled: %d", p_our_service->co2_handles.is_enabled);
 		}
 	// BME Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_bme_handles.cccd_handle) {
@@ -1893,10 +1898,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->temp_bme_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->temp_bme_handles.is_enabled: %d", p_our_service->temp_bme_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->temp_bme_handles.is_enabled: %d", p_our_service->temp_bme_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->temp_bme_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->temp_bme_handles.is_enabled: %d", p_our_service->temp_bme_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->temp_bme_handles.is_enabled: %d", p_our_service->temp_bme_handles.is_enabled);
 		}
 	// RTC Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_rtc_handles.cccd_handle) {
@@ -1905,10 +1910,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->temp_rtc_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->temp_rtc_handles.is_enabled: %d", p_our_service->temp_rtc_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->temp_rtc_handles.is_enabled: %d", p_our_service->temp_rtc_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->temp_rtc_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->temp_rtc_handles.is_enabled: %d", p_our_service->temp_rtc_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->temp_rtc_handles.is_enabled: %d", p_our_service->temp_rtc_handles.is_enabled);
 		}
 	// nRF Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_nrf_handles.cccd_handle) {
@@ -1917,10 +1922,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->temp_nrf_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->temp_nrf_handles.is_enabled: %d", p_our_service->temp_nrf_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->temp_nrf_handles.is_enabled: %d", p_our_service->temp_nrf_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->temp_nrf_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->temp_nrf_handles.is_enabled: %d", p_our_service->temp_nrf_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->temp_nrf_handles.is_enabled: %d", p_our_service->temp_nrf_handles.is_enabled);
 		}
 	// BME Humidity
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rh_handles.cccd_handle) {
@@ -1929,10 +1934,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		// Print handle and value
 		if(data_buffer == 0x0001) {
 			p_our_service->rh_handles.is_enabled = true;
-			NRF_LOG_DEBUG("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
 			p_our_service->rh_handles.is_enabled = false;
-			NRF_LOG_DEBUG("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
+			NRF_LOG_INFO("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
 		}
 
 	}
@@ -1967,7 +1972,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		using_live_stream_interval = false;
 		stop_measurements();
-		start_measurements(log_interval);
+		// Only restart it if logging is turned on
+		if (on_logging) {
+			start_measurements(log_interval);
+		}
 
 	}
 
@@ -1994,7 +2002,7 @@ void ble_custom_service_ble_evt_handler(ble_custom_service_t * p_our_service, bl
             p_our_service->conn_handle = BLE_CONN_HANDLE_INVALID;
 
             // When disconnected; stop our timer to stop temperature measurements
-            app_timer_stop(m_our_char_timer_id);
+//            app_timer_stop(m_our_char_timer_id);
 
             break;
         default:
@@ -4198,7 +4206,14 @@ static void test_all()
 
 	// Push values to App if Live Streaming
 	if (is_live_streaming) {
-		timer_timeout_handler(NULL);
+		for (int i=0; i < APP_PUSH_RETRY_NUM; i++) {	// Keep trying
+			err_code = timer_timeout_handler(NULL);
+			if (err_code == NRF_SUCCESS) break;
+		};
+		if (err_code) {
+			NRF_LOG_ERROR("** ERROR: Figaro CO2 read, err_code=%d **", err_code);
+		}
+
 	}
 
 	// Print out summary
@@ -4208,6 +4223,7 @@ static void test_all()
 
 	NRF_LOG_INFO("log_interval = %d", log_interval);
 	NRF_LOG_INFO("min_battery_level = %d", min_battery_level);
+	NRF_LOG_INFO("is_live_streaming = %d", is_live_streaming);
 
 	NRF_LOG_DEBUG("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
 //	NRF_LOG_DEBUG("ble_gap_address = %x", ble_gap_address.addr);
@@ -4301,11 +4317,11 @@ static void timers_init(void)
                                 hpm_startup_handler);	// sets a flag when timer expires
     APP_ERROR_CHECK(err_code);
 
-    // For live stream BLE
-    err_code = app_timer_create(&m_our_char_timer_id,
-    							APP_TIMER_MODE_REPEATED,
-								timer_timeout_handler);	// sets a flag when timer expires
-    APP_ERROR_CHECK(err_code);
+//    // For live stream BLE
+//    err_code = app_timer_create(&m_our_char_timer_id,
+//    							APP_TIMER_MODE_REPEATED,
+//								timer_timeout_handler);	// sets a flag when timer expires
+//    APP_ERROR_CHECK(err_code);
 
 
 }
@@ -4383,6 +4399,7 @@ int main(void) {
     // Save some values
     sd_ble_gap_addr_get(&ble_gap_address);
 	// Other info user cares about
+	NRF_LOG_INFO("on_logging = %d", on_logging);
 	NRF_LOG_INFO("log_interval = %d", log_interval);
 	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
 	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
@@ -4411,8 +4428,9 @@ int main(void) {
 //	APP_ERROR_CHECK(err_code);
 //	test_all();
 
-	// FOR TESTING, COMMENT OUT LATER (App will turn on system)
-	start_measurements(log_interval);
+	if (on_logging) {
+		start_measurements(log_interval);
+	}
 
     // Enter main loop.
     for (;;)
