@@ -133,7 +133,7 @@ static void stop_measurements();
 #define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
-#define READING_CONFIG_FILE			0	// If we want to read in saved values from the config file
+#define READING_SETTINGS_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
 static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
@@ -152,7 +152,7 @@ static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
 //#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
-#define CONFIG_FILE_NAME   "config.txt"
+#define SETTINGS_FILE_NAME   "settings.txt"
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
 #define BLE_TEST_FILE_NAME   "ble_150k.TXT"	//"ble_150k.TXT"	//"ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
@@ -358,7 +358,7 @@ static sensen_broadcast_data broadcast_data;
 //static uint8_array_t broadcast_data = {0};
 
 /** SD Card Config File Variables **/
-static bool updating_config_file = false;
+static bool updating_settings_file = false;
 
 /** FatFs Variables **/
 static FATFS fs;
@@ -1417,12 +1417,12 @@ uint32_t read_SDC() {
 }
 
 
-// Write a new Config file
-FRESULT sd_config_update() {
-	NRF_LOG_ERROR("In sd_config_update()");
+// Write a new Settings file
+FRESULT sd_settings_update() {
+	NRF_LOG_ERROR("In sd_settings_update()");
 	uint32_t bytes_written;
 
-    sd_open(CONFIG_FILE_NAME, FA_WRITE | FA_OPEN_ALWAYS);
+    sd_open(SETTINGS_FILE_NAME, FA_WRITE | FA_OPEN_ALWAYS);
 
 //	f_lseek(&file, 0);
 	ff_result = f_write(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_written);
@@ -1433,10 +1433,10 @@ FRESULT sd_config_update() {
 }
 
 // Read a new Config file
-FRESULT sd_config_read() {
+FRESULT sd_settings_read() {
 	uint32_t bytes_read;
 
-    sd_open(CONFIG_FILE_NAME, FA_READ);
+    sd_open(SETTINGS_FILE_NAME, FA_READ);
 
 //	f_lseek(&file, 0);
 	ff_result = f_read(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_read);
@@ -1447,10 +1447,10 @@ FRESULT sd_config_read() {
 }
 
 // Write a new Config file
-FRESULT sd_config_create() {
+FRESULT sd_settings_create() {
 
 	// First write the data we have so far
-	sd_config_update();
+	sd_settings_update();
 
 	// Now write extra stuff
     char out_str[MAX_OUT_STR_SIZE];
@@ -1664,7 +1664,7 @@ static void send_sdc_packets() {
 			if (done_reading_sdc && (bytes_remaining == 0) ) {
 				done_sending_sdc = true;
 				is_offloading = false;
-				updating_config_file = true;
+				updating_settings_file = true;
 				sdc_read_num = 0;
 //				start_sending_sdc_data = false;
 				NRF_LOG_INFO("Final cnt: %d", cnt);
@@ -2020,10 +2020,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		if (on_logging && !is_logging) {	// wants state change: turn on
 			start_measurements(log_interval);
-			updating_config_file = true;
+			updating_settings_file = true;
 		} else if (!on_logging && is_logging) {	// wants state change: turn off
 			stop_measurements();
-			updating_config_file = true;
+			updating_settings_file = true;
 		}
 
 		NRF_LOG_DEBUG("AS on_logging: %d", on_logging);
@@ -2040,7 +2040,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		}
 		if (on_logging) {
 			start_measurements(log_interval);	// Restarted with the updated log_interval value
-			updating_config_file = true;
+			updating_settings_file = true;
 		}
 
 	// Setting the RTC to a user defined time
@@ -4809,17 +4809,17 @@ int main(void) {
 	sd_power_on();
 	sd_init();
 	sd_mount();
-	FRESULT ff_result_stat = f_stat(CONFIG_FILE_NAME, NULL);
+	FRESULT ff_result_stat = f_stat(SETTINGS_FILE_NAME, NULL);
 	if (ff_result_stat == FR_NO_FILE) {
 		// File doesn't exist, so make a new one
 		NRF_LOG_INFO("Writing new config file..");
-		ff_result = sd_config_create();
-		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_config_create() ff_result: %d", ff_result);
+		ff_result = sd_settings_create();
+		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_settings_create() ff_result: %d", ff_result);
 	} else if(ff_result_stat == FR_OK) {
-		if (READING_CONFIG_FILE) {
+		if (READING_SETTINGS_FILE) {
 			NRF_LOG_INFO("Reading in previous config file..");
-			ff_result = sd_config_read();
-			if (ff_result != FR_OK) NRF_LOG_WARNING("sd_config_read() ff_result: %d", ff_result);
+			ff_result = sd_settings_read();
+			if (ff_result != FR_OK) NRF_LOG_WARNING("sd_settings_read() ff_result: %d", ff_result);
 		}
 	} else {
 		NRF_LOG_WARNING("ff_result_stat: %d", ff_result_stat);
@@ -4869,9 +4869,9 @@ int main(void) {
 			NRF_LOG_DEBUG("end_byte: %d", end_byte);
 
 //			// Update the Config file
-//			updating_config_file = true;
+//			updating_settings_file = true;
 ////			f_close(&file);
-////			sd_config_update();
+////			sd_settings_update();
 
         	// Uninitialize here, since don't want to interfere with another SDC operation
         	sd_uninit();
@@ -4879,7 +4879,7 @@ int main(void) {
 
         	updating_end_byte = false;
         }
-        if (updating_config_file) {
+        if (updating_settings_file) {
 
 			// Start the SD card
 			sd_power_on();
@@ -4887,13 +4887,13 @@ int main(void) {
 			sd_mount();
 
 			// Update Config file
-			sd_config_update();
+			sd_settings_update();
 
 			// Start the SD card
 			sd_uninit();
 			sd_power_off();
 
-			updating_config_file = false;	// reset flag
+			updating_settings_file = false;	// reset flag
         }
         if (start_sending_sdc_data) {
 			send_sdc_data();
