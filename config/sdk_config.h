@@ -3234,9 +3234,10 @@
 // <4=> Debug 
 
 #ifndef NRF_LOG_DEFAULT_LEVEL
+//#define NRF_LOG_DEFAULT_LEVEL 0
+//#define NRF_LOG_DEFAULT_LEVEL 2
 //#define NRF_LOG_DEFAULT_LEVEL 3
 #define NRF_LOG_DEFAULT_LEVEL 4
-//#define NRF_LOG_DEFAULT_LEVEL 0
 #endif
 
 // <q> NRF_LOG_DEFERRED  - Enable deffered logger.
@@ -5348,8 +5349,8 @@
 
 // <o> NRF_SDH_BLE_VS_UUID_COUNT - The number of vendor-specific UUIDs.
 #ifndef NRF_SDH_BLE_VS_UUID_COUNT
-//#define NRF_SDH_BLE_VS_UUID_COUNT 1
-#define NRF_SDH_BLE_VS_UUID_COUNT 2
+#define NRF_SDH_BLE_VS_UUID_COUNT 1
+//#define NRF_SDH_BLE_VS_UUID_COUNT 2
 //#define NRF_SDH_BLE_VS_UUID_COUNT 3
 #endif
 

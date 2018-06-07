@@ -113,13 +113,16 @@
 static void test_all();
 static ret_code_t set_rtc(uint8_t sec, uint8_t min, uint8_t hour, uint8_t wday, uint8_t date, uint8_t mon, uint8_t year);
 void twi_init (void);
+static void start_measurements(uint32_t temp_log_interval);
+static void stop_measurements();
 
 
 
 #define SUM				0
 #define HAP				1
 #define BATTERY_TEST	2
-#define CUSTOM			3
+#define WAIT_TIME_TEST	3
+#define CUSTOM			4
 
 
 
@@ -127,29 +130,39 @@ void twi_init (void);
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, BATTERY_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
+#define READING_CONFIG_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
+static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
-static uint32_t log_interval = 1000*1000;	// units: ms
-//#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
-//#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
-#define SPEC_CO_STARTUP_WAIT_TIME		1*1000	//3*1000	//ms
+#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		30*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
+#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
+//#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
+//#define SPEC_CO_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
+#define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
+//static uint16_t min_battery_level = 10*1000;	// units: percent*1000
+#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
 //#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
+#define CONFIG_FILE_NAME   "config.txt"
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
-#define BLE_TEST_FILE_NAME   "ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
-#define NUM_SAMPLES_PER_ON_CYCLE	1	//150	// 1,	20
-#define WAIT_BETWEEN_SAMPLES		0	//200	// ms, waitin only if there are multiple samples
+#define BLE_TEST_FILE_NAME   "ble_150k.TXT"	//"ble_150k.TXT"	//"ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
+#define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
+//#define NUM_SAMPLES_PER_ON_CYCLE	150	//1	//150	// 1,	20
+#define WAIT_BETWEEN_SAMPLES		0	//0	//200	// ms, waitin only if there are multiple samples
+//#define WAIT_BETWEEN_SAMPLES		200	//0	//200	// ms, waitin only if there are multiple samples
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
 #define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
-#define INITIAL_MSG_WAIT			2000	// <500 causes issues?
+#define INITIAL_MSG_WAIT			3000	// <500 causes issues?
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 
@@ -197,6 +210,7 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "SUM_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
@@ -214,6 +228,7 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_10Ah;
+	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "HAP_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
@@ -227,17 +242,37 @@ typedef enum {
 	//////				UV_SI1145,		// I2C
 			BME,		// I2C
 			SMALL_PLANTOWER,	// I2C,	2
-	//		SPEC_CO,	// AIN,			102
-	//		FIGARO_CO2,	// I2C,			579
+			SPEC_CO,	// AIN,			102
+			FIGARO_CO2,	// I2C,			579
 	//////			DEEP_SLEEP,
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-	static battery_type battery_type_used = BAT_LIPO_1200mAh;	//BAT_LIPO_1200mAh;
-//	min_battery_level = 0;
+	static battery_type battery_type_used = BAT_LIPO_10Ah;	//BAT_LIPO_1200mAh;
+	static uint16_t min_battery_level = 0;	// units: percent*1000
 	#define DEVICE_NAME                     "BATT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
+#elif PRODUCT_TYPE == WAIT_TIME_TEST
+	static component_type components_used[] = {
+		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
+		SDC,		// SD card, SPIO
+		BATTERY,	// AIN(no pin),	3279
+		FUEL_GAUGE,	// I2C
+		TEMP_NRF,	// REGISTER
+		RTC,		// I2C
+	//////				UV_SI1145,		// I2C
+			BME,		// I2C
+			SMALL_PLANTOWER,	// I2C,	2
+			SPEC_CO,	// AIN,			102
+			FIGARO_CO2,	// I2C,			579
+	//////			DEEP_SLEEP,
+	};
+	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+	static battery_type battery_type_used = BAT_LIPO_10Ah;	//BAT_LIPO_1200mAh;
+	static uint16_t min_battery_level = 0;	// units: percent*1000
+	#define DEVICE_NAME                     "WAIT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 #else
 	static component_type components_used[] = {
-//		ADP,		// DIG
+		ADP,		// DIG
 		ADP_HIGH,	// DIG, for switching only High Power sensors
 		SDC,		// SD card, SPIO
 		BATTERY,	// AIN(no pin),	3279
@@ -253,6 +288,7 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "UART_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 #endif
 
@@ -289,21 +325,42 @@ static ret_code_t err_code;
 #elif PRODUCT_TYPE == HAP
 	#define FILE_HEADER	"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #else
-	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 #endif
-#define SDC_BUFF_SIZE		1000	//100
+
+/** SD Card Data Offload Variables **/
+#define SDC_BUFF_SIZE		10*1000	//100
 static uint8_t sdc_buff[SDC_BUFF_SIZE];	// = {0};
 static uint16_t sdc_buff_current_pos = 0;
 static uint32_t bytes_remaining = 0;
 static uint16_t packet_length = 0;
 //static bool resending_packets = false;
 static bool start_sending_sdc_data = false;
+//static bool keep_sending_sdc_packets = false;
 static bool done_reading_sdc = true;
 static bool done_sending_sdc = true;
 static int sdc_read_num = 0;
 //static uint32_t sdc_bytes_read = 0;
+static uint32_t start_byte = 0;
+static uint32_t end_byte = 0;
+static bool updating_end_byte = false;
+static bool in_measuring_loop = false;
+static bool is_offloading = false;
+//static uint8_t * broadcast_data;
+typedef struct
+{
+	uint32_t err_cnt_total;
+	bool is_logging;
+	uint32_t fuel_percent;
+} sensen_broadcast_data;
+static sensen_broadcast_data broadcast_data;
+//static uint8_t broadcast_data = 0xFF;
+//static uint8_array_t broadcast_data = {0};
 
+/** SD Card Config File Variables **/
+static bool updating_config_file = false;
 
+/** FatFs Variables **/
 static FATFS fs;
 static FIL file;
 FRESULT ff_result;
@@ -410,6 +467,8 @@ static nrf_saadc_value_t battery_value;
 	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 #elif PRODUCT_TYPE == BATTERY_TEST
 	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
+#elif PRODUCT_TYPE == WAIT_TIME_TEST
+	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 #else
 //	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
@@ -482,7 +541,7 @@ static int hpm_10_value = 0;
 /** WATCHDOG TIMER (WDT) **/
 nrf_drv_wdt_channel_id wdt_meas_channel_id;
 nrf_drv_wdt_channel_id wdt_sleep_channel_id;
-#define WDT_TIMEOUT_MEAS		60*1000 + NUM_SAMPLES_PER_ON_CYCLE*(WAIT_BETWEEN_SAMPLES+1000) + (DHT_STARTUP_WAIT_TIME + PLANTOWER_STARTUP_WAIT_TIME + SPEC_CO_STARTUP_WAIT_TIME + HPM_STARTUP_WAIT_TIME)	// ms, make it more than DHT and HPM delays
+#define WDT_TIMEOUT_MEAS		60*1000 + NUM_SAMPLES_PER_ON_CYCLE*(WAIT_BETWEEN_SAMPLES+1000) + (DHT_STARTUP_WAIT_TIME + PLANTOWER_STARTUP_WAIT_TIME + SPEC_CO_STARTUP_WAIT_TIME + HPM_STARTUP_WAIT_TIME + FIGARO_CO2_STARTUP_WAIT_TIME)	// ms, make it more than DHT and HPM delays
 //#define WDT_TIMEOUT_MEAS		15*1000
 //#define WDT_TIMEOUT_SLEEP		LOG_INTERVAL + WDT_TIMEOUT_MEAS
 static int wdt_triggered = 0;
@@ -494,8 +553,10 @@ static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
 static volatile bool plantower_startup_wait_done = false;
 static volatile bool specCO_startup_wait_done = false;
+static volatile bool figCO2_startup_wait_done = false;
 APP_TIMER_DEF(plantower_startup_timer);
 APP_TIMER_DEF(specCO_startup_timer);
+APP_TIMER_DEF(figCO2_startup_timer);
 static int hpm_startup_wait_done = 0;
 APP_TIMER_DEF(hpm_startup_timer);
 
@@ -548,8 +609,11 @@ APP_TIMER_DEF(hpm_startup_timer);
 //#define APP_ADV_TIMEOUT_IN_SECONDS      500                                         /**< The advertising timeout (in units of seconds). */
 #define APP_ADV_TIMEOUT_IN_SECONDS      0                                         /**< The advertising timeout (in units of seconds). */
 
-#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
-#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
+//#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
+//#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
+#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(8, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
+#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(12, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
+
 #define SLAVE_LATENCY                   0                                           /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
 #define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000)                       /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
@@ -558,7 +622,7 @@ APP_TIMER_DEF(hpm_startup_timer);
 
 #define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
-BLE_NUS_DEF(m_nus);                                                                 /**< BLE NUS service instance. */
+//BLE_NUS_DEF(m_nus);                                                                 /**< BLE NUS service instance. */
 NRF_BLE_GATT_DEF(m_gatt);                                                           /**< GATT module instance. */
 BLE_ADVERTISING_DEF(m_advertising);                                                 /**< Advertising module instance. */
 
@@ -596,6 +660,10 @@ static ble_gap_addr_t ble_gap_address;
 #define BLE_UUID_MIN_BATT_CHARACTERISTIC		0x0013 // The Firmware Version
 #define BLE_UUID_RTC_CHARACTERISTIC				0x0014 // The Firmware Version
 #define BLE_UUID_DATA_OFFLOAD_CHARACTERISTIC	0x0015 // The Firmware Version
+#define BLE_UUID_START_BYTE_CHARACTERISTIC		0x0016 // The Firmware Version
+#define BLE_UUID_END_BYTE_CHARACTERISTIC		0x0017 // The Firmware Version
+#define BLE_UUID_IS_OFFLOADING_CHARACTERISTIC	0x0018 // The Firmware Version
+#define BLE_UUID_BATT_VOLTAGE_CHARACTERISTIC	0x0019 // The Firmware Version
 
 // Product specific chars
 #define BLE_UUID_PM2_5_CHARACTERISTIC			0x0020 // plantower_2_5_value
@@ -616,7 +684,7 @@ static char HAP_FW_version[] = 		"HAP_v1.00";
 static bool is_logging = false;			// Whether we are currently logging
 //static bool on_logging = false;	// Whether the App wants to turn on logging
 //static uint32_t log_interval = LOG_INTERVAL;	// units: ms
-static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
+//static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
 static int32_t time_to_be_set = 0;
 static bool is_live_streaming = false;	// Used to skip stuff we don't want when live streaming
 #define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
@@ -640,6 +708,10 @@ typedef struct
 	ble_gatts_char_handles_t    min_batt_handles;
 	ble_gatts_char_handles_t    rtc_handles;
 	ble_gatts_char_handles_t    data_offload_handles;
+	ble_gatts_char_handles_t    start_byte_handles;
+	ble_gatts_char_handles_t    end_byte_handles;
+	ble_gatts_char_handles_t    is_offloading_handles;
+	ble_gatts_char_handles_t    batt_voltage_handles;
 	// Product specific chars
 	ble_gatts_char_handles_t    pm2_5_handles;
 	ble_gatts_char_handles_t    pm10_handles;
@@ -660,6 +732,8 @@ static ble_custom_service_t m_HAP_service;
 #elif PRODUCT_TYPE == HAP
 	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
 #elif PRODUCT_TYPE == BATTERY_TEST
+	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+#elif PRODUCT_TYPE == WAIT_TIME_TEST
 	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
 #else
 	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
@@ -818,7 +892,7 @@ static uint32_t custom_char_add(	ble_custom_service_t * p_our_service,
                                        &char_md,
                                        &attr_char_value,
 									   p_our_char_handles);
-    NRF_LOG_DEBUG("custom_uuid: 0x%x", custom_uuid);
+//    NRF_LOG_DEBUG("custom_uuid: 0x%x", custom_uuid);
     APP_ERROR_CHECK(err_code);
 
     printf("\r\nService handle: %#x\n\r", p_our_service->service_handle);
@@ -948,7 +1022,7 @@ void our_temperature_characteristic_update(ble_custom_service_t *p_our_service, 
 // Sending out the temperature value BLE update
 ret_code_t custom_characteristic_update(ble_custom_service_t *p_our_service, ble_gatts_char_handles_t * p_char_handles, void * p_value, uint16_t value_len)
 {
-	NRF_LOG_DEBUG("In custom_characteristic_update(): p_char_handles: %d", p_char_handles);
+//	NRF_LOG_DEBUG("In custom_characteristic_update(): p_char_handles: %d", p_char_handles);
 
     // OUR_JOB: Step 3.E, Update characteristic value
     if (p_our_service->conn_handle != BLE_CONN_HANDLE_INVALID)
@@ -1228,6 +1302,19 @@ void sd_uninit() {
 }
 
 
+// Power on SD
+void sd_power_on() {
+	nrf_gpio_cfg_output(ADP1_PIN);
+	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
+}
+
+// Power off SD
+void sd_power_off() {
+	nrf_gpio_cfg_output(ADP1_PIN);
+	nrf_gpio_pin_clear(ADP1_PIN);		// Enable HIGH
+}
+
+
 // Initialize SD
 void sd_init() {
 	/**
@@ -1261,7 +1348,7 @@ void sd_init() {
 	}
 	if (disk_state)
 	{
-		NRF_LOG_DEBUG("Disk initialization failed. disk_state: %d", disk_state);
+		NRF_LOG_ERROR("Disk initialization failed. disk_state: %d", disk_state);
 	}
 
 }
@@ -1273,7 +1360,7 @@ void sd_mount() {
     NRF_LOG_DEBUG("Mounting volume...");
     ff_result = f_mount(&fs, "", 1);
     if (ff_result) {
-        NRF_LOG_DEBUG("Mount failed.");
+    	NRF_LOG_ERROR("Mount failed.");
     }
 }
 
@@ -1285,7 +1372,7 @@ void sd_open(char fname[], BYTE mode) {
     NRF_LOG_DEBUG("Opening file: %s", fname);
     ff_result = f_open(&file, fname, mode);
     if (ff_result != FR_OK) {
-        NRF_LOG_DEBUG("Unable to open or create file: %s, %d", fname, ff_result);
+    	NRF_LOG_ERROR("Unable to open or create file: %s, %d", fname, ff_result);
     }
 
 }
@@ -1306,6 +1393,10 @@ void sd_write_str(const void* buff) {
 	}
 	else {
 		NRF_LOG_DEBUG("%d bytes written.", bytes_written);
+//		// Update the SD card size
+//		end_byte = f_size(&file);
+//		NRF_LOG_DEBUG("end_byte: %d", end_byte);
+
 	}
 }
 
@@ -1324,6 +1415,60 @@ uint32_t read_SDC() {
 
 	return bytes_read;
 }
+
+
+// Write a new Config file
+FRESULT sd_config_update() {
+	NRF_LOG_ERROR("In sd_config_update()");
+	uint32_t bytes_written;
+
+    sd_open(CONFIG_FILE_NAME, FA_WRITE | FA_OPEN_ALWAYS);
+
+//	f_lseek(&file, 0);
+	ff_result = f_write(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_written);
+	ff_result = f_write(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_written);
+	ff_result = f_write(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_written);
+
+	return ff_result;
+}
+
+// Read a new Config file
+FRESULT sd_config_read() {
+	uint32_t bytes_read;
+
+    sd_open(CONFIG_FILE_NAME, FA_READ);
+
+//	f_lseek(&file, 0);
+	ff_result = f_read(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_read);
+	ff_result = f_read(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_read);
+	ff_result = f_read(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_read);
+
+	return ff_result;
+}
+
+// Write a new Config file
+FRESULT sd_config_create() {
+
+	// First write the data we have so far
+	sd_config_update();
+
+	// Now write extra stuff
+    char out_str[MAX_OUT_STR_SIZE];
+	int out_str_size = sprintf(out_str, "\r\n"
+			"ble_gap_address = %X:%X:%X:%X:%X:%X\r\n"
+			"sensen_FW_version: %s\r\n",
+			ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0],
+			sensen_FW_version
+			);
+    if (out_str_size > MAX_OUT_STR_SIZE) {
+    	NRF_LOG_ERROR("** ERROR: out_str too big!, out_str_size=%d", out_str_size);
+    	err_cnt++;
+    }
+    sd_write_str(out_str);
+
+	return ff_result;
+}
+
 
 
 /**
@@ -1367,7 +1512,7 @@ void save_data(void) {
 	#elif PRODUCT_TYPE == HAP
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
 	#else
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -1379,16 +1524,51 @@ void save_data(void) {
 
     sd_write_str(out_str);
 
+
+
+
+
+//    // FOR TESTING, REMOVE LATER
+//	uint32_t bytes_written;
+//	uint32_t bytes_read;
+//	f_lseek(&file, 0);
+////	sd_write_str("Testing write at beginning...");
+//	start_byte = 2;
+//	ff_result = f_write(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_written);
+//	ff_result = f_write(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_written);
+//	ff_result = f_write(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_written);
+//
+//	start_byte = 0;
+//	is_logging = 0;
+//	log_interval = 0;
+//
+//	f_lseek(&file, 0);
+//	ff_result = f_read(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_read);
+//	ff_result = f_read(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_read);
+//	ff_result = f_read(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_read);
+//
+//	NRF_LOG_DEBUG("--AWRT");
+//	NRF_LOG_DEBUG("start_byte: %d", start_byte);
+//	NRF_LOG_DEBUG("is_logging: %d", is_logging);
+//	NRF_LOG_DEBUG("log_interval: %d", log_interval);
+
+
+
+
+
+
+
     // Need to Uninit stuff.  O/w will not write on subsequent loops if ADP shuts off SDC; also drains power
-    (void) f_close(&file);
-    ff_result = f_mount(0, "", 1);
-    if (ff_result) {
-    	NRF_LOG_WARNING("** WARNING: UNmount Failed, ff_result: %d", ff_result);
-    }
-    DSTATUS disk_state = disk_uninitialize(0);
-    if (disk_state != 1) {
-    	NRF_LOG_WARNING("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
-    }
+//    (void) f_close(&file);
+//    ff_result = f_mount(0, "", 1);
+//    if (ff_result) {
+//    	NRF_LOG_WARNING("** WARNING: UNmount Failed, ff_result: %d", ff_result);
+//    }
+//    DSTATUS disk_state = disk_uninitialize(0);
+//    if (disk_state != 1) {
+//    	NRF_LOG_WARNING("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
+//    }
+	sd_uninit();
 
 }
 
@@ -1396,8 +1576,10 @@ void save_data(void) {
 // Split up SDC into packets and keep sending
 static void send_sdc_packets() {
 
-	NRF_LOG_DEBUG("Initial sdc_buff_current_pos: %d", sdc_buff_current_pos);
+//	NRF_LOG_DEBUG("Initial sdc_buff_current_pos: %d", sdc_buff_current_pos);
 	int cnt = 0;
+//	keep_sending_sdc_packets = true;
+
 //	uint32_t bytes_remaining = 0;
 	uint16_t send_length = packet_length;
 //	resending_packets = false;
@@ -1423,21 +1605,21 @@ static void send_sdc_packets() {
 //			sd_open(BLE_TEST_FILE_NAME, FA_READ);
 
 			sdc_read_num++;
-        	NRF_LOG_DEBUG("--READ SDC: sdc_read_num: %d", sdc_read_num);
-        	NRF_LOG_DEBUG("f_tell(&file): %d", f_tell(&file));
+			NRF_LOG_INFO("--READ SDC: sdc_read_num: %d", sdc_read_num);
+//        	NRF_LOG_DEBUG("f_tell(&file): %d", f_tell(&file));
 			bytes_remaining = read_SDC();
 			sdc_buff_current_pos = 0;	// Reset to beginning
-			NRF_LOG_DEBUG("--AR");
+//			NRF_LOG_DEBUG("--AR");
 
-			app_sdc_info_t const * sdc_info;
-			sdc_info = app_sdc_info_get();
-        	NRF_LOG_DEBUG("sdc_info->num_blocks: %d", sdc_info->num_blocks);
-        	NRF_LOG_DEBUG("sdc_info->block_len: %d", sdc_info->block_len);
+//			app_sdc_info_t const * sdc_info;
+//			sdc_info = app_sdc_info_get();
+//        	NRF_LOG_DEBUG("sdc_info->num_blocks: %d", sdc_info->num_blocks);
+//        	NRF_LOG_DEBUG("sdc_info->block_len: %d", sdc_info->block_len);
 
 //			sdc_bytes_read = bytes_remaining;
         	NRF_LOG_DEBUG("bytes_remaining: %d", bytes_remaining);
     		if (bytes_remaining < SDC_BUFF_SIZE) {
-            	NRF_LOG_DEBUG("done_reading_sdc: %d", done_reading_sdc);
+            	NRF_LOG_INFO("done_reading_sdc: %d", done_reading_sdc);
     			done_reading_sdc = true;
     		}
     	}
@@ -1448,20 +1630,23 @@ static void send_sdc_packets() {
 		} else {
 			send_length = packet_length;
 		}
-    	NRF_LOG_DEBUG("-sdc_read_num: %d", sdc_read_num);
-    	NRF_LOG_DEBUG("bytes_remaining: %d, packet_length: %d, send_length: %d", bytes_remaining, packet_length, send_length);
-//    	nrf_delay_ms(500);
+//    	NRF_LOG_DEBUG("-sdc_read_num: %d", sdc_read_num);
+//    	NRF_LOG_DEBUG("bytes_remaining: %d, packet_length: %d, send_length: %d", bytes_remaining, packet_length, send_length);
+////    	nrf_delay_ms(500);
 
 		// Sending the data over BLE
-		err_code = ble_nus_string_send(&m_nus, &sdc_buff[sdc_buff_current_pos], &send_length);
+//		err_code = ble_nus_string_send(&m_nus, &sdc_buff[sdc_buff_current_pos], &send_length);
+		err_code = custom_characteristic_update(&m_SS_service, &m_SS_service.data_offload_handles, &sdc_buff[sdc_buff_current_pos], send_length);
+
+
         if (err_code == NRF_ERROR_RESOURCES ||
             err_code == NRF_ERROR_INVALID_STATE ||
             err_code == BLE_ERROR_GATTS_SYS_ATTR_MISSING)
         {
-        	NRF_LOG_DEBUG("send_sdc_packets(), err_code: %d", err_code);
-        	NRF_LOG_DEBUG("sdc_buff_current_pos: %d", sdc_buff_current_pos);
-        	NRF_LOG_DEBUG("cnt: %d", cnt);
-//        	NRF_LOG_DEBUG("send_sdc_packets(), %d, err_code: %d", NRF_ERROR_RESOURCES, err_code);
+//        	NRF_LOG_DEBUG("send_sdc_packets(), err_code: %d", err_code);
+//        	NRF_LOG_DEBUG("sdc_buff_current_pos: %d", sdc_buff_current_pos);
+//        	NRF_LOG_DEBUG("cnt: %d", cnt);
+////        	NRF_LOG_DEBUG("send_sdc_packets(), %d, err_code: %d", NRF_ERROR_RESOURCES, err_code);
             break;
         }
         else if (err_code != NRF_SUCCESS)
@@ -1472,18 +1657,29 @@ static void send_sdc_packets() {
         	// If successfully sent, update position for next one
 			sdc_buff_current_pos += send_length;
 			bytes_remaining -= send_length;
+			start_byte += send_length;
 			cnt++;
 
 			// Check if we read all the SDC and sent the remaining data
 			if (done_reading_sdc && (bytes_remaining == 0) ) {
 				done_sending_sdc = true;
+				is_offloading = false;
+				updating_config_file = true;
+				sdc_read_num = 0;
 //				start_sending_sdc_data = false;
-	        	NRF_LOG_DEBUG("Final cnt: %d", cnt);
+				NRF_LOG_INFO("Final cnt: %d", cnt);
+				NRF_LOG_INFO("Final send_length: %d", send_length);
+				NRF_LOG_INFO("start_byte: %d", start_byte);
+				NRF_LOG_INFO("end_byte: %d", end_byte);
 
 	        	// Uninitialize here, since done with SDC
 	        	sd_uninit();
-	    		nrf_gpio_cfg_output(ADP1_PIN);
-	    		nrf_gpio_pin_clear(ADP1_PIN);		// Enable HIGH
+	        	sd_power_off();
+//	    		nrf_gpio_cfg_output(ADP1_PIN);
+//	    		nrf_gpio_pin_clear(ADP1_PIN);		// Enable HIGH
+
+	    		// Restart measurements when it's done
+	    		start_measurements(log_interval);
 
 				break;
 			}
@@ -1505,8 +1701,18 @@ static void send_sdc_data() {
 
 	NRF_LOG_DEBUG("--ENTERED send_sdc_data()");
 
+	// Stop measurements while sending data, and wait for current measurement to finish
+	stop_measurements();
+	NRF_LOG_INFO("Waiting for in_measuring_loop..");
+	while (in_measuring_loop) {
+//			nrf_delay_ms(1000);
+	}
+
 	// reset flag so that it doesn't try to send again every time it wakes up
 	start_sending_sdc_data = false;
+    done_reading_sdc = false;
+	done_sending_sdc = false;
+
 
     // Read the SD card and send the data
     packet_length = BLE_TX_PACKET_SIZE;
@@ -1514,21 +1720,27 @@ static void send_sdc_data() {
 //	uint8_t sdc_packet[packet_length];
 //    uint8_t ble_sdc_buff[packet_length];
 
-    // Initialize SD card
-//    if (!done_reading_sdc) {
 
-	nrf_gpio_cfg_output(ADP1_PIN);
-	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
-//	nrf_delay_ms(1000);
+//	nrf_gpio_cfg_output(ADP1_PIN);
+//	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
+////	nrf_delay_ms(1000);
+    sd_power_on();
 	sd_init();
 	sd_mount();
 //		sd_open(BLE_TEST_FILE_NAME, FA_READ | FA_WRITE);
 	sd_open(BLE_TEST_FILE_NAME, FA_READ);
+	// Start where we left off last time
+	f_lseek(&file, start_byte);
 
-//    }
+////	// Get the SD card size
+//	end_byte = f_size(&file);
+//	NRF_LOG_DEBUG("end_byte: %d", end_byte);
 
 
-	send_sdc_packets();
+
+
+//	send_sdc_packets();
+//	keep_sending_sdc_packets = true;
 
 }
 
@@ -1543,43 +1755,44 @@ static void send_sdc_data() {
  * @param[in] length   Length of the data.
  */
 /**@snippet [Handling the data received over BLE] */
-static void nus_data_handler(ble_nus_evt_t * p_evt)
-{
-
-    if (p_evt->type == BLE_NUS_EVT_RX_DATA)
-    {
-//        uint32_t err_code;
-//        uint32_t err_code = NRF_SUCCESS;
-
-        NRF_LOG_DEBUG("Received data from BLE NUS. Writing data on UART.");
-        NRF_LOG_HEXDUMP_DEBUG(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
-
-
-        // FOR TESTING: trying to read a special symbol (ends in '*'), then send to App
-        char flag_send = '*';
-        if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length-1] == flag_send) {
-            NRF_LOG_DEBUG("Detected flag_send: %c, sending data", flag_send);
-
-            start_sending_sdc_data = true;
-        }
-
-
-    }
-
-    if (p_evt->type == BLE_NUS_EVT_TX_RDY) {
-//    	NRF_LOG_DEBUG("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
-//		if (resending_packets) {
-		if (!done_sending_sdc) {
-	    	NRF_LOG_DEBUG("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
-			send_sdc_packets();
-//				send_sdc_data();
-		}
-
-    }
-
-
-}
-/**@snippet [Handling the data received over BLE] */
+//static void nus_data_handler(ble_nus_evt_t * p_evt)
+//{
+//
+//    if (p_evt->type == BLE_NUS_EVT_RX_DATA)
+//    {
+////        uint32_t err_code;
+////        uint32_t err_code = NRF_SUCCESS;
+//
+//    	NRF_LOG_INFO("Received data from BLE NUS. Writing data on UART.");
+//        NRF_LOG_HEXDUMP_INFO(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
+//
+//
+//        // FOR TESTING: trying to read a special symbol (ends in '*'), then send to App
+//        char flag_send = '*';
+//        if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length-1] == flag_send) {
+//        	NRF_LOG_INFO("Detected flag_send: %c, sending data", flag_send);
+//
+//            start_sending_sdc_data = true;
+//        }
+//
+//
+//    }
+//
+//    if (p_evt->type == BLE_NUS_EVT_TX_RDY) {
+//////    	NRF_LOG_DEBUG("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
+//////		if (resending_packets) {
+////		if (!done_sending_sdc) {
+////	    	NRF_LOG_DEBUG("nus_data_handler(): Detected BLE_NUS_EVT_TX_RDY");
+//////			send_sdc_packets();
+//////			keep_sending_sdc_packets = true;
+//////				send_sdc_data();
+////		}
+//
+//    }
+//
+//
+//}
+///**@snippet [Handling the data received over BLE] */
 
 
 
@@ -1588,15 +1801,15 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
  */
 static void services_init(void)
 {
-    uint32_t       err_code;
-    ble_nus_init_t nus_init;
-
-    memset(&nus_init, 0, sizeof(nus_init));
-
-    nus_init.data_handler = nus_data_handler;
-
-    err_code = ble_nus_init(&m_nus, &nus_init);
-    APP_ERROR_CHECK(err_code);
+//    uint32_t       err_code;
+//    ble_nus_init_t nus_init;
+//
+//    memset(&nus_init, 0, sizeof(nus_init));
+//
+//    nus_init.data_handler = nus_data_handler;
+//
+//    err_code = ble_nus_init(&m_nus, &nus_init);
+//    APP_ERROR_CHECK(err_code);
 
     // Init our custom services
 //    sensen_service_init(&m_SS_service);
@@ -1612,7 +1825,12 @@ static void services_init(void)
     custom_char_add(&m_SS_service, BLE_UUID_MIN_BATT_CHARACTERISTIC,		&m_SS_service.min_batt_handles, 	(uint8_t *) &min_battery_level, 	sizeof(min_battery_level),		0,1,	0);
     custom_char_add(&m_SS_service, BLE_UUID_RTC_CHARACTERISTIC,				&m_SS_service.rtc_handles, 			(uint8_t *) &time_to_be_set, 		sizeof(time_to_be_set),			0,1,	0);
 
-    custom_char_add(&m_SS_service, BLE_UUID_DATA_OFFLOAD_CHARACTERISTIC,	&m_SS_service.data_offload_handles, (uint8_t *) &sensen_FW_version, 	DATA_OFFLOAD_PACKET_SIZE,		0,0,	1);
+    custom_char_add(&m_SS_service, BLE_UUID_DATA_OFFLOAD_CHARACTERISTIC,	&m_SS_service.data_offload_handles, (uint8_t *) sdc_buff, 				DATA_OFFLOAD_PACKET_SIZE,		0,0,	1);
+    custom_char_add(&m_SS_service, BLE_UUID_START_BYTE_CHARACTERISTIC,		&m_SS_service.start_byte_handles, 	(uint8_t *) &start_byte, 			sizeof(start_byte),				1,0,	0);
+    custom_char_add(&m_SS_service, BLE_UUID_END_BYTE_CHARACTERISTIC,		&m_SS_service.end_byte_handles, 	(uint8_t *) &end_byte, 				sizeof(end_byte),				1,0,	0);
+    custom_char_add(&m_SS_service, BLE_UUID_IS_OFFLOADING_CHARACTERISTIC,	&m_SS_service.is_offloading_handles, (uint8_t *) &is_offloading, 		sizeof(is_offloading),			1,1,	1);
+
+    custom_char_add(&m_SS_service, BLE_UUID_BATT_VOLTAGE_CHARACTERISTIC,	&m_SS_service.batt_voltage_handles, (uint8_t *) &fuel_v_cell, 			sizeof(fuel_v_cell),			1,0,	0);
 
 //    our_char_add(&m_SS_service);
 
@@ -1802,8 +2020,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		if (on_logging && !is_logging) {	// wants state change: turn on
 			start_measurements(log_interval);
+			updating_config_file = true;
 		} else if (!on_logging && is_logging) {	// wants state change: turn off
 			stop_measurements();
+			updating_config_file = true;
 		}
 
 		NRF_LOG_DEBUG("AS on_logging: %d", on_logging);
@@ -1820,6 +2040,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		}
 		if (on_logging) {
 			start_measurements(log_interval);	// Restarted with the updated log_interval value
+			updating_config_file = true;
 		}
 
 	// Setting the RTC to a user defined time
@@ -1827,6 +2048,67 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		NRF_LOG_INFO("time_to_be_set: %d", time_to_be_set);
 		setting_new_time = true;	// set flag, handle it later whe reading RTC
+
+	// Data offload
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->data_offload_handles.cccd_handle) {
+		// Get data
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->data_offload_handles.cccd_handle, &rx_data);
+		// Print handle and value
+		if(data_buffer == 0x0001) {
+			p_our_service->data_offload_handles.is_enabled = true;
+			NRF_LOG_INFO("p_our_service->data_offload_handles.is_enabled: %d", p_our_service->data_offload_handles.is_enabled);
+
+//			// Make sure we aren't in the measuring loop, since SDC might already init/uninit
+//			NRF_LOG_INFO("Waiting for in_measuring_loop..");
+//			while (in_measuring_loop) {
+//		//			nrf_delay_ms(1000);
+//			}
+
+
+			updating_end_byte = true;
+//			// Update the End Byte (file size) that will be sent
+//		    sd_power_on();
+//			sd_init();
+//			sd_mount();
+//			sd_open(BLE_TEST_FILE_NAME, FA_READ);
+////			// Start where we left off last time
+////			f_lseek(&file, start_byte);
+//			// Get the SD card size
+//			end_byte = f_size(&file);
+//			NRF_LOG_DEBUG("end_byte: %d", end_byte);
+//
+//        	// Uninitialize here, since don't want to interfere with another SDC operation
+//        	sd_uninit();
+//        	sd_power_off();
+
+
+//			start_sending_sdc_data = true;
+
+		} else if(data_buffer == 0x0000) {
+			p_our_service->data_offload_handles.is_enabled = false;
+			NRF_LOG_INFO("p_our_service->data_offload_handles.is_enabled: %d", p_our_service->data_offload_handles.is_enabled);
+
+			done_sending_sdc = true;
+		}
+
+	// Is_Offloading, whether it is Transmitting data
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->is_offloading_handles.cccd_handle) {
+		// Get data
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->is_offloading_handles.cccd_handle, &rx_data);
+		// Print handle and value
+		if(data_buffer == 0x0001) {
+			p_our_service->is_offloading_handles.is_enabled = true;
+			NRF_LOG_INFO("p_our_service->is_offloading_handles.is_enabled: %d", p_our_service->is_offloading_handles.is_enabled);
+
+			start_sending_sdc_data = true;
+
+		} else if(data_buffer == 0x0000) {
+			p_our_service->is_offloading_handles.is_enabled = false;
+			NRF_LOG_INFO("p_our_service->is_offloading_handles.is_enabled: %d", p_our_service->is_offloading_handles.is_enabled);
+
+			done_sending_sdc = true;
+		}
+
 
 //			// TWI (I2C) init
 //		    twi_init();
@@ -2035,14 +2317,14 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 //			break;
 
         case BLE_GAP_EVT_CONNECTED:
-            NRF_LOG_DEBUG("Connected");
+        	NRF_LOG_INFO("Connected");
             err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
             APP_ERROR_CHECK(err_code);
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
-            NRF_LOG_DEBUG("Disconnected");
+        	NRF_LOG_INFO("Disconnected");
             // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             break;
@@ -2263,14 +2545,29 @@ static void advertising_init(void)
 //    init.advdata.p_tx_power_level	= BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;	// needed to disable timeout
 
     // Scan response: send the UUID
-    ble_uuid_t m_adv_uuids[] =  {
-    		{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE},			// ble_nus
-//    		{BLE_UUID_SENSEN_SERVICE, BLE_UUID_TYPE_VENDOR_BEGIN},	// sensen_service
-//    		{BLE_UUID_SUM_SERVICE, BLE_UUID_TYPE_VENDOR_BEGIN},		// SUM_service
-//    		{BLE_UUID_HAP_SERVICE, BLE_UUID_TYPE_VENDOR_BEGIN},		// HAP_service
-    };
-    init.srdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
-    init.srdata.uuids_complete.p_uuids  = m_adv_uuids;
+//    ble_uuid_t m_adv_uuids[] =  {
+//    		{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE},			// ble_nus
+////    		{BLE_UUID_SENSEN_SERVICE, BLE_UUID_TYPE_VENDOR_BEGIN},	// sensen_service
+////    		{BLE_UUID_SUM_SERVICE, BLE_UUID_TYPE_VENDOR_BEGIN},		// SUM_service
+////    		{BLE_UUID_HAP_SERVICE, BLE_UUID_TYPE_VENDOR_BEGIN},		// HAP_service
+//    };
+//    init.srdata.uuids_complete.uuid_cnt = sizeof(m_adv_uuids) / sizeof(m_adv_uuids[0]);
+//    init.srdata.uuids_complete.p_uuids  = m_adv_uuids;
+
+//    broadcast_data.err_cnt_total = 	0x11111119;
+//    broadcast_data.is_logging = 	is_logging;
+//	broadcast_data.fuel_percent = 	0xFFFFFFF1;
+
+    ble_advdata_service_data_t sr_service_data;
+    memset(&sr_service_data, 0, sizeof(sr_service_data));
+    sr_service_data.service_uuid = BLE_UUID_SENSEN_SERVICE;
+//    sr_service_data.data.p_data = broadcast_data;
+//    sr_service_data.data.size = sizeof(err_cnt_total) + sizeof(is_logging) + sizeof(fuel_percent);
+    sr_service_data.data.p_data = (uint8_t *) &broadcast_data;
+    sr_service_data.data.size = sizeof(broadcast_data);
+    init.srdata.p_service_data_array = &sr_service_data;
+    init.srdata.service_data_count++;
+
 
     init.config.ble_adv_fast_enabled  = true;
     init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
@@ -2283,10 +2580,20 @@ static void advertising_init(void)
 
     init.evt_handler = on_adv_evt;
 
+//    broadcast_data.err_cnt_total = 	0x11111119;
+//    broadcast_data.is_logging = 	0xFFFFFFFA;
+//    broadcast_data.err_cnt_total = 	0x22222228;
+
     err_code = ble_advertising_init(&m_advertising, &init);
     APP_ERROR_CHECK(err_code);
 
+//    broadcast_data.err_cnt_total = 	0x33333337;
+
+
     ble_advertising_conn_cfg_tag_set(&m_advertising, APP_BLE_CONN_CFG_TAG);
+
+//    broadcast_data.err_cnt_total = 	0x44444446;
+
 }
 
 
@@ -3264,6 +3571,16 @@ static void calc_fuel_percent() {
 				runtime_estimate = (time_now - t0) * battery_scale_factor * ((1.0f*(100-FUEL_PERCENT_THRESHOLD)*1000) / (1.0f*fuel_p0-FUEL_PERCENT_THRESHOLD*1000));	// Later part corrects for not starting at 100% battery
 //				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_percent_raw) / (1.0f*100*1000));
 				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_p0) / (1.0f*100*1000));
+				NRF_LOG_DEBUG("previous fuel_t0: %d", fuel_t0);
+
+				uint32_t max_fuel_percent;
+				if (fuel_p0 > 100*1000) max_fuel_percent = fuel_p0;
+				else max_fuel_percent = 100*1000;
+				fuel_t0 = t0 - runtime_estimate * ((max_fuel_percent - fuel_p0) / (1.0f*max_fuel_percent));
+				NRF_LOG_DEBUG("modified fuel_t0: %d", fuel_t0);
+				NRF_LOG_DEBUG("fuel_p0: %d", fuel_p0);
+
+				fuel_t0 = t0;	// NOTE: This assumes we start with battery ~100%
 			}
 
 			NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
@@ -3560,6 +3877,16 @@ void get_data() {
 		NRF_LOG_INFO("----------------------------------");
 		NRF_LOG_FLUSH();
 
+		// Wait for sensor to settle from when ADP turned on
+		NRF_LOG_INFO("Waiting for figCO2_startup_wait_done..");
+		while (!figCO2_startup_wait_done) {
+//			nrf_delay_ms(1000);
+		}
+		NRF_LOG_DEBUG("--FIGARO_CO2 WAIT DONE");
+
+//		// Wait 2 seconds
+//		nrf_delay_ms(FIGARO_CO2_STARTUP_WAIT_TIME);
+
 		err_code = 1;
 		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
 			err_code = read_figCO2();
@@ -3623,7 +3950,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 26, 15 +4, 	5, 17, 5, 18);	// about 11 seconds of delay
+			set_rtc(00, 33, 21 +4, 	4, 6, 6, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -3821,7 +4148,7 @@ void get_data() {
 		NRF_LOG_INFO("Testing Small Plantower with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------------------");
 		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for startup wait..");
+		NRF_LOG_INFO("Waiting for plantower_startup_wait_done..");
 		while (!plantower_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
@@ -3885,7 +4212,7 @@ void get_data() {
 		NRF_LOG_INFO("------------------");
 
 		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for startup wait..");
+		NRF_LOG_INFO("Waiting for specCO_startup_wait_done..");
 		while (!specCO_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
@@ -3905,6 +4232,8 @@ void get_data() {
 
 			nrf_delay_ms(SPEC_CO_DELAY);
 		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
 
 //		specCO_value = specCO_total/128.0f;
 //		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
@@ -4068,6 +4397,11 @@ int test_main() {
 		err_code = app_timer_start(specCO_startup_timer, APP_TIMER_TICKS(SPEC_CO_STARTUP_WAIT_TIME), NULL);
 		APP_ERROR_CHECK(err_code);
 	}
+    figCO2_startup_wait_done = 0;
+	if (using_component(FIGARO_CO2, components_used)) {
+		err_code = app_timer_start(figCO2_startup_timer, APP_TIMER_TICKS(FIGARO_CO2_STARTUP_WAIT_TIME), NULL);
+		APP_ERROR_CHECK(err_code);
+	}
     hpm_startup_wait_done = 0;
 	if (using_component(HONEYWELL, components_used)) {
 		err_code = app_timer_start(hpm_startup_timer, APP_TIMER_TICKS(HPM_STARTUP_WAIT_TIME), NULL);
@@ -4178,8 +4512,9 @@ int test_main() {
 
 // If the battery level is too low, stop measurements and sleep forever
 static void check_min_battery_level() {
-	if (fuel_percent < min_battery_level) {
-		NRF_LOG_INFO("fuel_percent < min_battery_level");
+//	if (fuel_percent < min_battery_level) {
+	if (fuel_v_cell < min_battery_level) {
+		NRF_LOG_WARNING("fuel_v_cell < min_battery_level: LOW POWER MODE");
 		stop_measurements();
 
 		// Ensure that all ADP's are off
@@ -4200,9 +4535,54 @@ static void check_min_battery_level() {
 static void test_all()
 {
 
+	// Show that we're measuring, check it later so it doesn't interfere with BLE
+	in_measuring_loop = true;
 
 	err_cnt = test_main();
 	err_cnt_total += err_cnt;
+
+
+	// Update Broadcasted values
+	broadcast_data.err_cnt_total = err_cnt_total;
+	broadcast_data.is_logging = is_logging;
+	broadcast_data.fuel_percent = fuel_percent;
+	// NOTE: Appears in reverse direction on Sniffer:
+	// 0x0200000001000000D1130100 means
+	//	broadcast_data.err_cnt_total = 2;
+	//	broadcast_data.is_logging = 1;
+	//	broadcast_data.fuel_percent = 70609;
+	//	broadcast_data.err_cnt_total = 2;
+	//	broadcast_data.is_logging = 1;
+	//	broadcast_data.fuel_percent = 5;
+
+//	err_code = sd_ble_gap_adv_data_set(NULL, 0, (uint8_t *) &broadcast_data, sizeof(broadcast_data));
+//	NRF_LOG_INFO("sd_ble_gap_adv_data_set() err_code = %d", err_code);
+//	APP_ERROR_CHECK(err_code);
+
+////	ble_advdata_t *new_advdata;
+//	new_advdata->adv_data.len = sizeof(broadcast_data);
+//	err_code = ble_advdata_encode(new_advdata, (uint8_t *) &broadcast_data, );
+//	APP_ERROR_CHECK(err_code);
+//	err_code = ble_advdata_set(NULL, new_advdata);
+//	APP_ERROR_CHECK(err_code);
+
+	ble_advdata_t new_advdata;
+    memset(&new_advdata, 0, sizeof(new_advdata));
+    ble_advdata_service_data_t sr_service_data;
+    memset(&sr_service_data, 0, sizeof(sr_service_data));
+    sr_service_data.service_uuid = BLE_UUID_SENSEN_SERVICE;
+//    sr_service_data.data.p_data = broadcast_data;
+//    sr_service_data.data.size = sizeof(err_cnt_total) + sizeof(is_logging) + sizeof(fuel_percent);
+    sr_service_data.data.p_data = (uint8_t *) &broadcast_data;
+    sr_service_data.data.size = sizeof(broadcast_data);
+    new_advdata.p_service_data_array = &sr_service_data;
+    new_advdata.service_data_count++;
+
+	err_code = ble_advdata_set(NULL, &new_advdata);
+	APP_ERROR_CHECK(err_code);
+
+
+
 
 	// Push values to App if Live Streaming
 	if (is_live_streaming) {
@@ -4246,6 +4626,7 @@ static void test_all()
 	// Final stuff to do before going back to sleep
 	meas_loop_wait_done = false;
 	check_min_battery_level();
+	in_measuring_loop = false;
 
 
 }
@@ -4271,6 +4652,10 @@ static void plantower_startup_handler(void * p_context) {
 static void specCO_startup_handler(void * p_context) {
 	specCO_startup_wait_done = 1;
 	NRF_LOG_DEBUG("specCO_startup_wait_done: %d", specCO_startup_wait_done);
+}
+static void figCO2_startup_handler(void * p_context) {
+	figCO2_startup_wait_done = 1;
+	NRF_LOG_DEBUG("figCO2_startup_wait_done: %d", figCO2_startup_wait_done);
 }
 static void hpm_startup_handler(void * p_context) {
 	hpm_startup_wait_done = 1;
@@ -4311,6 +4696,10 @@ static void timers_init(void)
     err_code = app_timer_create(&specCO_startup_timer,
     							APP_TIMER_MODE_SINGLE_SHOT,
 								specCO_startup_handler);	// sets a flag when timer expires
+    APP_ERROR_CHECK(err_code);
+    err_code = app_timer_create(&figCO2_startup_timer,
+    							APP_TIMER_MODE_SINGLE_SHOT,
+								figCO2_startup_handler);	// sets a flag when timer expires
     APP_ERROR_CHECK(err_code);
     err_code = app_timer_create(&hpm_startup_timer,
     							APP_TIMER_MODE_SINGLE_SHOT,
@@ -4353,6 +4742,8 @@ int main(void) {
 		NRF_LOG_INFO("PRODUCT_TYPE: HAP");
 	} else if (PRODUCT_TYPE == BATTERY_TEST) {
 		NRF_LOG_INFO("PRODUCT_TYPE: BATTERY_TEST");
+	} else if (PRODUCT_TYPE == WAIT_TIME_TEST) {
+		NRF_LOG_INFO("PRODUCT_TYPE: WAIT_TIME_TEST");
 	} else if (PRODUCT_TYPE == CUSTOM) {
 		NRF_LOG_INFO("PRODUCT_TYPE: CUSTOM");
 	} else {
@@ -4414,6 +4805,30 @@ int main(void) {
 	NRF_LOG_FLUSH();
 
 
+	// Make new Config file, or Read in the values
+	sd_power_on();
+	sd_init();
+	sd_mount();
+	FRESULT ff_result_stat = f_stat(CONFIG_FILE_NAME, NULL);
+	if (ff_result_stat == FR_NO_FILE) {
+		// File doesn't exist, so make a new one
+		NRF_LOG_INFO("Writing new config file..");
+		ff_result = sd_config_create();
+		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_config_create() ff_result: %d", ff_result);
+	} else if(ff_result_stat == FR_OK) {
+		if (READING_CONFIG_FILE) {
+			NRF_LOG_INFO("Reading in previous config file..");
+			ff_result = sd_config_read();
+			if (ff_result != FR_OK) NRF_LOG_WARNING("sd_config_read() ff_result: %d", ff_result);
+		}
+	} else {
+		NRF_LOG_WARNING("ff_result_stat: %d", ff_result_stat);
+	}
+	sd_uninit();
+	sd_power_off();
+
+
+
 //    printf("\r\nUART Start! (printf)\r\n");
     NRF_LOG_DEBUG("UART Start!");
     err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
@@ -4440,10 +4855,53 @@ int main(void) {
         if (meas_loop_wait_done) {
         	test_all();
         }
+        if (updating_end_byte) {
+			// Start the SD card
+		    sd_power_on();
+			sd_init();
+			sd_mount();
+			// Update the End Byte (file size) that will be sent
+			sd_open(BLE_TEST_FILE_NAME, FA_READ);
+//			// Start where we left off last time
+//			f_lseek(&file, start_byte);
+			// Get the SD card size
+			end_byte = f_size(&file);
+			NRF_LOG_DEBUG("end_byte: %d", end_byte);
+
+//			// Update the Config file
+//			updating_config_file = true;
+////			f_close(&file);
+////			sd_config_update();
+
+        	// Uninitialize here, since don't want to interfere with another SDC operation
+        	sd_uninit();
+        	sd_power_off();
+
+        	updating_end_byte = false;
+        }
+        if (updating_config_file) {
+
+			// Start the SD card
+			sd_power_on();
+			sd_init();
+			sd_mount();
+
+			// Update Config file
+			sd_config_update();
+
+			// Start the SD card
+			sd_uninit();
+			sd_power_off();
+
+			updating_config_file = false;	// reset flag
+        }
         if (start_sending_sdc_data) {
-            done_reading_sdc = false;
-			done_sending_sdc = false;
 			send_sdc_data();
+        }
+        if (!done_sending_sdc) {
+//            done_reading_sdc = false;
+//			done_sending_sdc = false;
+			send_sdc_packets();
         }
     }
 
