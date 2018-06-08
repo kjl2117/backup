@@ -130,23 +130,23 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_SETTINGS_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 90*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
-#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 //#define PLANTOWER_STARTUP_WAIT_TIME		30*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
-#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
+#define PLANTOWER_STARTUP_WAIT_TIME		70*1000	//3*1000	//ms
+//#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
 //#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
-//#define SPEC_CO_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
+#define SPEC_CO_STARTUP_WAIT_TIME		0.010*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
-#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+#define FIGARO_CO2_STARTUP_WAIT_TIME	65*1000	// 2*1000 is too small, only reading value==360
 
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
@@ -287,7 +287,7 @@ typedef enum {
 	//////			DEEP_SLEEP,
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	static battery_type battery_type_used = BAT_LIPO_10Ah;
 	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "UART_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 #endif
@@ -325,7 +325,7 @@ static ret_code_t err_code;
 #elif PRODUCT_TYPE == HAP
 	#define FILE_HEADER	"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #else
-	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO, specCO_value_10, specCO_value_20, specCO_value_30, specCO_value_40, specCO_value_50, specCO_value_60, figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 #endif
 
 /** SD Card Data Offload Variables **/
@@ -451,6 +451,13 @@ static nrf_saadc_value_t sharpPM_value;
 #define SPEC_CO_CHANNEL_NUM		2
 #define SPEC_CO_DELAY			2	//ms, wait between samples that will be avg'ed
 static int16_t specCO_value;	// units: ppm
+#define SPEC_CO_WAIT_BETWEEN_SAMPLES			10*1000	//ms, wait between multiple samples
+static int16_t specCO_value_10;	// units: ppm
+static int16_t specCO_value_20;	// units: ppm
+static int16_t specCO_value_30;	// units: ppm
+static int16_t specCO_value_40;	// units: ppm
+static int16_t specCO_value_50;	// units: ppm
+static int16_t specCO_value_60;	// units: ppm
 
 /** Figaro CO Variables **/
 #define FIG_CO_CHANNEL_NUM		3
@@ -1512,7 +1519,7 @@ void save_data(void) {
 	#elif PRODUCT_TYPE == HAP
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
 	#else
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (specCO_value_10*1000*1000/V_to_adc_1000),(int) (specCO_value_20*1000*1000/V_to_adc_1000),(int) (specCO_value_30*1000*1000/V_to_adc_1000),(int) (specCO_value_40*1000*1000/V_to_adc_1000),(int) (specCO_value_50*1000*1000/V_to_adc_1000),(int) (specCO_value_60*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -3772,6 +3779,187 @@ int32_t get_temp_nrf(void) {
  */
 void get_data() {
 
+
+	// Spec CO, Analog read.  TODO: implement averaging over 128 samples
+	if (using_component(SPEC_CO, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Testing Spec CO...");
+		NRF_LOG_INFO("------------------");
+
+		// Wait for sensor to settle from when ADP turned on
+		NRF_LOG_INFO("Waiting for specCO_startup_wait_done..");
+		while (!specCO_startup_wait_done) {
+//			nrf_delay_ms(1000);
+		}
+		NRF_LOG_DEBUG("--SPEC_CO WAIT DONE");
+
+		// Pre-read wait, prevents garbage reading
+		nrf_saadc_value_t specCO_temp;
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		int specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+
+//		specCO_value = specCO_total/128.0f;
+//		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
+		specCO_value = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
+//		NRF_LOG_DEBUG("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
+		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*adc_to_mV);
+
+
+
+
+		// Read #2
+		nrf_delay_ms(SPEC_CO_WAIT_BETWEEN_SAMPLES);
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+		specCO_value_10 = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value_10: %d", specCO_value_10);
+		NRF_LOG_INFO("specCO_value_10 (mV): %d", specCO_value_10*adc_to_mV);
+
+
+
+
+		// Read #3
+		nrf_delay_ms(SPEC_CO_WAIT_BETWEEN_SAMPLES);
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+		specCO_value_20 = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value_20: %d", specCO_value_20);
+		NRF_LOG_INFO("specCO_value_20 (mV): %d", specCO_value_20*adc_to_mV);
+
+
+
+
+		// Read #4
+		nrf_delay_ms(SPEC_CO_WAIT_BETWEEN_SAMPLES);
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+		specCO_value_30 = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value_30: %d", specCO_value_30);
+		NRF_LOG_INFO("specCO_value_30 (mV): %d", specCO_value_30*adc_to_mV);
+
+
+
+
+		// Read #5
+		nrf_delay_ms(SPEC_CO_WAIT_BETWEEN_SAMPLES);
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+		specCO_value_40 = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value_40: %d", specCO_value_40);
+		NRF_LOG_INFO("specCO_value_40 (mV): %d", specCO_value_40*adc_to_mV);
+
+
+
+
+		// Read #6
+		nrf_delay_ms(SPEC_CO_WAIT_BETWEEN_SAMPLES);
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+		specCO_value_50 = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value_50: %d", specCO_value_50);
+		NRF_LOG_INFO("specCO_value_50 (mV): %d", specCO_value_50*adc_to_mV);
+
+
+
+
+		// Read #7
+		nrf_delay_ms(SPEC_CO_WAIT_BETWEEN_SAMPLES);
+		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+		nrf_delay_ms(PRE_READ_WAIT);
+
+		NRF_LOG_DEBUG("Sampling...");
+		specCO_total = 0;
+		// read it a bunch of times and then average
+		for (int i = 0; i < 128; i++) {
+			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+			specCO_total += specCO_temp;
+
+			nrf_delay_ms(SPEC_CO_DELAY);
+		}
+
+		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+		specCO_value_60 = specCO_total/128;
+		NRF_LOG_DEBUG("specCO_value_60: %d", specCO_value_60);
+		NRF_LOG_INFO("specCO_value_60 (mV): %d", specCO_value_60*adc_to_mV);
+
+
+	}
+
+
+
 //NRF_LOG_DEBUG("--ST");
 //if (0) {
 
@@ -4205,43 +4393,43 @@ void get_data() {
 	}
 
 
-	// Spec CO, Analog read.  TODO: implement averaging over 128 samples
-	if (using_component(SPEC_CO, components_used)) {
-		NRF_LOG_INFO("");
-		NRF_LOG_INFO("Testing Spec CO...");
-		NRF_LOG_INFO("------------------");
-
-		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for specCO_startup_wait_done..");
-		while (!specCO_startup_wait_done) {
-//			nrf_delay_ms(1000);
-		}
-		NRF_LOG_DEBUG("--SPEC_CO WAIT DONE");
-
-		// Pre-read wait, prevents garbage reading
-		nrf_saadc_value_t specCO_temp;
-		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
-		nrf_delay_ms(PRE_READ_WAIT);
-
-		NRF_LOG_DEBUG("Sampling...");
-		int specCO_total = 0;
-		// read it a bunch of times and then average
-		for (int i = 0; i < 128; i++) {
-			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
-			specCO_total += specCO_temp;
-
-			nrf_delay_ms(SPEC_CO_DELAY);
-		}
-
-		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
-
-//		specCO_value = specCO_total/128.0f;
+//	// Spec CO, Analog read.  TODO: implement averaging over 128 samples
+//	if (using_component(SPEC_CO, components_used)) {
+//		NRF_LOG_INFO("");
+//		NRF_LOG_INFO("Testing Spec CO...");
+//		NRF_LOG_INFO("------------------");
+//
+//		// Wait for sensor to settle from when ADP turned on
+//		NRF_LOG_INFO("Waiting for specCO_startup_wait_done..");
+//		while (!specCO_startup_wait_done) {
+////			nrf_delay_ms(1000);
+//		}
+//		NRF_LOG_DEBUG("--SPEC_CO WAIT DONE");
+//
+//		// Pre-read wait, prevents garbage reading
+//		nrf_saadc_value_t specCO_temp;
+//		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+//		nrf_delay_ms(PRE_READ_WAIT);
+//
+//		NRF_LOG_DEBUG("Sampling...");
+//		int specCO_total = 0;
+//		// read it a bunch of times and then average
+//		for (int i = 0; i < 128; i++) {
+//			nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
+//			specCO_total += specCO_temp;
+//
+//			nrf_delay_ms(SPEC_CO_DELAY);
+//		}
+//
+//		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+//
+////		specCO_value = specCO_total/128.0f;
+////		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
+//		specCO_value = specCO_total/128;
 //		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
-		specCO_value = specCO_total/128;
-		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
-//		NRF_LOG_DEBUG("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
-		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*adc_to_mV);
-	}
+////		NRF_LOG_DEBUG("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
+//		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*adc_to_mV);
+//	}
 
 
 	/** Test HPM sensor (Serial comm) **/
@@ -4360,17 +4548,19 @@ int test_main() {
 	NRF_LOG_INFO("WAKE: Turning ON ADP Power...");
 	NRF_LOG_INFO("-----------------------------");
 
-    nrf_gpio_cfg_output(ADP1_PIN);
-    nrf_gpio_cfg_output(ADP2_PIN);
-    nrf_gpio_cfg_output(STATUS_LED);
-//	nrf_gpio_pin_clear(STATUS_LED);	// Enable LOW, Turn ON LED
 
+    nrf_gpio_cfg_output(ADP1_PIN);
 	nrf_gpio_pin_set(ADP1_PIN);		// Enable HIGH
 	NRF_LOG_INFO("ADP1_PIN: HIGH.");
-	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
-	NRF_LOG_INFO("ADP2_PIN: HIGH.");
+
+//    nrf_gpio_cfg_output(ADP2_PIN);
+//	nrf_gpio_pin_set(ADP2_PIN);		// Enable HIGH
+//	NRF_LOG_INFO("ADP2_PIN: HIGH.");
+
+    nrf_gpio_cfg_output(STATUS_LED);
 	nrf_gpio_pin_set(STATUS_LED);	// Enable HIGH, Turn ON LED
 	NRF_LOG_DEBUG("STATUS_LED: HIGH.");
+//	nrf_gpio_pin_clear(STATUS_LED);	// Enable LOW, Turn ON LED
 
 //	nrf_delay_ms(1000);
 
