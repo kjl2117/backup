@@ -130,19 +130,19 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	CUSTOM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
-#define READING_SETTINGS_FILE			0	// If we want to read in saved values from the config file
+#define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 90*1000;	//60*1000;	// units: ms
-//static uint32_t log_interval = 10*1000;	// units: ms
-//#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 5*1000;	// units: ms
+#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 //#define PLANTOWER_STARTUP_WAIT_TIME		30*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		70*1000	//3*1000	//ms
-//#define SPEC_CO_STARTUP_WAIT_TIME		15*1000	//ms,	Response time < 30s (15s typical)
+//#define PLANTOWER_STARTUP_WAIT_TIME		6*1000	//3*1000	//ms
+#define SPEC_CO_STARTUP_WAIT_TIME		10*1000	//ms,	Response time < 30s (15s typical)
 //#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
-#define SPEC_CO_STARTUP_WAIT_TIME		0.010*1000	//3*1000	//ms
+//#define SPEC_CO_STARTUP_WAIT_TIME		6*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
@@ -152,7 +152,8 @@ static uint32_t log_interval = 90*1000;	//60*1000;	// units: ms
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
 //#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
-#define SETTINGS_FILE_NAME   "settings.txt"
+#define VALUES_FILE_NAME   "_values.txt"
+#define INFO_FILE_NAME   "info.txt"
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
 #define BLE_TEST_FILE_NAME   "ble_150k.TXT"	//"ble_150k.TXT"	//"ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
@@ -186,6 +187,8 @@ typedef enum {
 	FUEL_GAUGE,	// I2C
 	SMALL_PLANTOWER,	// I2C
 	HONEYWELL,			// SERIAL
+	AMBIENT_LTR,	// I2C
+	UVA_VEML,			// I2C	(NOTE: has 2 addr)
 	DEEP_SLEEP,
 	SDC,		// SD card, SPIO
 } component_type;
@@ -207,6 +210,8 @@ typedef enum {
 		TEMP_NRF,	// REGISTER
 		RTC,		// I2C
 	//////				UV_SI1145,		// I2C
+		AMBIENT_LTR,	// I2C
+		UVA_VEML		// I2C
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_1200mAh;
@@ -280,6 +285,8 @@ typedef enum {
 		TEMP_NRF,	// REGISTER
 		RTC,		// I2C
 	//////				UV_SI1145,		// I2C
+		AMBIENT_LTR,	// I2C
+		UVA_VEML		// I2C
 			BME,		// I2C
 			SMALL_PLANTOWER,	// I2C,	2
 			SPEC_CO,	// AIN,			102
@@ -321,11 +328,11 @@ static ret_code_t err_code;
 #define FILE_NAME   "datalog.txt"
 #define MAX_OUT_STR_SIZE	200
 #if PRODUCT_TYPE == SUM
-	#define FILE_HEADER	"Time, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+	#define FILE_HEADER	"Time, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #elif PRODUCT_TYPE == HAP
 	#define FILE_HEADER	"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #else
-	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO, specCO_value_10, specCO_value_20, specCO_value_30, specCO_value_40, specCO_value_50, specCO_value_60, figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf,battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 #endif
 
 /** SD Card Data Offload Variables **/
@@ -358,7 +365,7 @@ static sensen_broadcast_data broadcast_data;
 //static uint8_array_t broadcast_data = {0};
 
 /** SD Card Config File Variables **/
-static bool updating_settings_file = false;
+static bool updating_values_file = false;
 
 /** FatFs Variables **/
 static FATFS fs;
@@ -505,6 +512,29 @@ const int UV_SI1145_addr = 0x60; // 8bit I2C address, 0x68 for RTC
 static uint16_t UV_SI1145_VIS_value = 0;	// units:
 static uint16_t UV_SI1145_IR_value = 0;		// units:
 static uint16_t UV_SI1145_UV_value = 0;		// units: 100*UV Index
+
+/** Ambient Light Sensor LTR-329ALS-01 (TWI) **/
+#define LTR303_ADDR   0x29 // default address
+#define LTR303_CONTR         0x80
+#define LTR303_MEAS_RATE     0x85
+#define LTR303_DATA_CH1_0    0x88
+#define LTR303_DATA_SIZE	4
+//#define LTR303_DATA_CH1_1    0x89
+//#define LTR303_DATA_CH0_0    0x8A
+//#define LTR303_DATA_CH0_1    0x8B
+static uint8_t LTR329_gain = 0;				// default 0
+static uint8_t LTR329_integration_time = 0;	// default 0
+static uint8_t LTR329_meas_rate = 3;			// default 3
+static uint16_t ambient_CH0;
+static uint16_t ambient_CH1;
+
+/** UVA Light Sensor VEML6070 (TWI) **/
+#define VEML6070_ADDR_H 0x39 ///< High address
+#define VEML6070_ADDR_L 0x38 ///< Low address
+static uint8_t UVA_integration_time = 3;	// default 1
+static uint16_t UVA_value;
+
+
 
 /** Small Plantower (TWI) **/
 #define PLANTOWER_TWI_BUFF_SIZE		32
@@ -1287,16 +1317,24 @@ static void gap_params_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+// Uninitialize SD (closes file, unmounts, uninit.. does NOT change ADP1)
+void sd_close() {
+	ff_result = f_close(&file);
+	if (ff_result) {
+		NRF_LOG_WARNING("** WARNING: f_close() Failed, ff_result: %d", ff_result);
+	}
+}
+
 
 // Uninitialize SD (closes file, unmounts, uninit.. does NOT change ADP1)
 void sd_uninit() {
 
 	NRF_LOG_DEBUG("sd_uninit()...");
 
-	ff_result = f_close(&file);
-	if (ff_result) {
-		NRF_LOG_WARNING("** WARNING: f_close() Failed, ff_result: %d", ff_result);
-	}
+//	ff_result = f_close(&file);
+//	if (ff_result) {
+//		NRF_LOG_WARNING("** WARNING: f_close() Failed, ff_result: %d", ff_result);
+//	}
 	ff_result = f_mount(0, "", 1);
 	if (ff_result) {
 		NRF_LOG_WARNING("** WARNING: UNmount Failed, ff_result: %d", ff_result);
@@ -1424,12 +1462,12 @@ uint32_t read_SDC() {
 }
 
 
-// Write a new Settings file
-FRESULT sd_settings_update() {
-	NRF_LOG_ERROR("In sd_settings_update()");
+// Write a new Values file
+FRESULT sd_values_update() {
+	NRF_LOG_ERROR("In sd_values_update()");
 	uint32_t bytes_written;
 
-    sd_open(SETTINGS_FILE_NAME, FA_WRITE | FA_OPEN_ALWAYS);
+    sd_open(VALUES_FILE_NAME, FA_WRITE | FA_OPEN_ALWAYS);
 
 //	f_lseek(&file, 0);
 	ff_result = f_write(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_written);
@@ -1440,10 +1478,10 @@ FRESULT sd_settings_update() {
 }
 
 // Read a new Config file
-FRESULT sd_settings_read() {
+FRESULT sd_values_read() {
 	uint32_t bytes_read;
 
-    sd_open(SETTINGS_FILE_NAME, FA_READ);
+    sd_open(VALUES_FILE_NAME, FA_READ);
 
 //	f_lseek(&file, 0);
 	ff_result = f_read(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_read);
@@ -1454,10 +1492,13 @@ FRESULT sd_settings_read() {
 }
 
 // Write a new Config file
-FRESULT sd_settings_create() {
+FRESULT sd_info_create() {
 
-	// First write the data we have so far
-	sd_settings_update();
+//	// First write the data we have so far
+//	sd_values_update();
+
+    sd_open(INFO_FILE_NAME, FA_WRITE | FA_OPEN_ALWAYS);
+
 
 	// Now write extra stuff
     char out_str[MAX_OUT_STR_SIZE];
@@ -1515,11 +1556,11 @@ void save_data(void) {
 
 	// Save different strings depending on the device
 	#if PRODUCT_TYPE == SUM
-		int out_str_size = sprintf(out_str, "%ld,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",time_now, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
+		int out_str_size = sprintf(out_str, "%ld,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu\r\n",time_now, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == HAP
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
 	#else
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (specCO_value_10*1000*1000/V_to_adc_1000),(int) (specCO_value_20*1000*1000/V_to_adc_1000),(int) (specCO_value_30*1000*1000/V_to_adc_1000),(int) (specCO_value_40*1000*1000/V_to_adc_1000),(int) (specCO_value_50*1000*1000/V_to_adc_1000),(int) (specCO_value_60*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -1575,6 +1616,7 @@ void save_data(void) {
 //    if (disk_state != 1) {
 //    	NRF_LOG_WARNING("** WARNING: Disk NOT properly uninitialized, disk_state: %d", disk_state);
 //    }
+    sd_close();
 	sd_uninit();
 
 }
@@ -1671,7 +1713,7 @@ static void send_sdc_packets() {
 			if (done_reading_sdc && (bytes_remaining == 0) ) {
 				done_sending_sdc = true;
 				is_offloading = false;
-				updating_settings_file = true;
+				updating_values_file = true;
 				sdc_read_num = 0;
 //				start_sending_sdc_data = false;
 				NRF_LOG_INFO("Final cnt: %d", cnt);
@@ -1680,6 +1722,7 @@ static void send_sdc_packets() {
 				NRF_LOG_INFO("end_byte: %d", end_byte);
 
 	        	// Uninitialize here, since done with SDC
+			    sd_close();
 	        	sd_uninit();
 	        	sd_power_off();
 //	    		nrf_gpio_cfg_output(ADP1_PIN);
@@ -2027,10 +2070,10 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		if (on_logging && !is_logging) {	// wants state change: turn on
 			start_measurements(log_interval);
-			updating_settings_file = true;
+			updating_values_file = true;
 		} else if (!on_logging && is_logging) {	// wants state change: turn off
 			stop_measurements();
-			updating_settings_file = true;
+			updating_values_file = true;
 		}
 
 		NRF_LOG_DEBUG("AS on_logging: %d", on_logging);
@@ -2047,7 +2090,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		}
 		if (on_logging) {
 			start_measurements(log_interval);	// Restarted with the updated log_interval value
-			updating_settings_file = true;
+			updating_values_file = true;
 		}
 
 	// Setting the RTC to a user defined time
@@ -3714,6 +3757,248 @@ static ret_code_t UV_SI1145_read() {
 }
 
 
+// Ambient Light Sensor LTR-329ALS-01 Settings
+static ret_code_t ambient_light_set_control(uint8_t gain, bool reset, bool active) {
+
+	// Sets the gain, SW reset and mode of LTR303
+	// Default value is 0x00
+	// If gain = 0, device is set to 1X gain (default)
+	// If gain = 1, device is set to 2X gain
+	// If gain = 2, device is set to 4X gain
+	// If gain = 3, device is set to 8X gain
+	// If gain = 4, invalid
+	// If gain = 5, invalid
+	// If gain = 6, device is set to 48X gain
+	// If gain = 7, device is set to 96X gain
+	//----------------------------------------
+	// If reset = false(0), initial start-up procedure not started (default)
+	// If reset = true(1), initial start-up procedure started
+	//----------------------------------------
+	// If mode = false(0), stand-by mode (default)
+	// If mode = true(1), active mode
+
+	uint8_t control = 0x00;
+
+	// sanity check for gain
+	if (gain > 3 && gain < 6) {
+		gain = 0x00;
+	}
+	else if(gain >= 7) {
+		gain = 0x00;
+	}
+
+	// control byte logic
+	control |= gain << 2;
+	if(reset) {
+		control |= 0x02;
+	}
+	if(active) {
+		control |= 0x01;
+	}
+
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Write default coefficients, maybe later read and overwrite with product-calibrated ones
+    uint8_t cmd[] = {LTR303_CONTR, control	};
+    err_code = nrf_drv_twi_tx(&m_twi, LTR303_ADDR, cmd, sizeof(cmd), false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_WARNING("** WARNING in UV_SI1145_init(), err_code: %d **", err_code);
+    	return err_code;
+    }
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
+
+// Ambient Light Sensor LTR-329ALS-01 Settings
+static ret_code_t ambient_light_set_meas_rate(uint8_t integrationTime, uint8_t measurementRate) {
+
+	// Sets the integration time and measurement rate of the sensor
+	// integrationTime is the measurement time for each ALs cycle
+	// measurementRate is the interval between DATA_REGISTERS update
+	// measurementRate must be set to be equal or greater than integrationTime
+	// Default value is 0x03
+	// If integrationTime = 0, integrationTime will be 100ms (default)
+	// If integrationTime = 1, integrationTime will be 50ms
+	// If integrationTime = 2, integrationTime will be 200ms
+	// If integrationTime = 3, integrationTime will be 400ms
+	// If integrationTime = 4, integrationTime will be 150ms
+	// If integrationTime = 5, integrationTime will be 250ms
+	// If integrationTime = 6, integrationTime will be 300ms
+	// If integrationTime = 7, integrationTime will be 350ms
+	//------------------------------------------------------
+	// If measurementRate = 0, measurementRate will be 50ms
+	// If measurementRate = 1, measurementRate will be 100ms
+	// If measurementRate = 2, measurementRate will be 200ms
+	// If measurementRate = 3, measurementRate will be 500ms (default)
+	// If measurementRate = 4, measurementRate will be 1000ms
+	// If measurementRate = 5, measurementRate will be 2000ms
+	// If measurementRate = 6, measurementRate will be 2000ms
+	// If measurementRate = 7, measurementRate will be 2000ms
+
+	uint8_t measurement = 0x00;
+
+	// Perform sanity checks
+	if(integrationTime >= 0x07) {
+		integrationTime = 0x00;
+	}
+	if(measurementRate >= 0x07) {
+		measurementRate = 0x00;
+	}
+
+	measurement |= integrationTime << 3;
+	measurement |= measurementRate;
+
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Write default coefficients, maybe later read and overwrite with product-calibrated ones
+    uint8_t cmd[] = {LTR303_MEAS_RATE, measurement	};
+    err_code = nrf_drv_twi_tx(&m_twi, LTR303_ADDR, cmd, sizeof(cmd), false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_WARNING("** WARNING in UV_SI1145_init(), err_code: %d **", err_code);
+    	return err_code;
+    }
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
+
+// Ambient Light Sensor LTR-329ALS-01 read
+static ret_code_t ambient_light_read() {
+
+	uint8_t cmd[LTR303_DATA_SIZE];
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+
+    // Tell it which register we want to start reading from
+    uint8_t reg0 = LTR303_DATA_CH1_0;
+    err_code = nrf_drv_twi_tx(&m_twi, LTR303_ADDR, &reg0, sizeof(reg0), true);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+//    APP_ERROR_CHECK(err_code);
+    // Read the value from that register
+	err_code = nrf_drv_twi_rx(&m_twi, LTR303_ADDR, cmd, LTR303_DATA_SIZE);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+//	APP_ERROR_CHECK(err_code);
+
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+
+    // Convert and store the values
+    ambient_CH1 = (cmd[1] << 8) | cmd[0];
+    ambient_CH0 = (cmd[3] << 8) | cmd[2];
+
+    return err_code;
+
+}
+
+
+// UVA Settings
+static ret_code_t UVA_set_control(uint8_t integrationTime, bool sleep) {
+
+	// If integrationTime = 0, integrationTime will be 1/2x
+	// If integrationTime = 1, integrationTime will be 1x (default)
+	// If integrationTime = 2, integrationTime will be 2x
+	// If integrationTime = 3, integrationTime will be 4x
+
+	// If active = 0, sleep
+	// If active = 1, wake
+
+	// sanity check for integrationTime
+	if (integrationTime > 3) {
+		integrationTime = 0x01;
+	}
+
+	uint8_t control = 0x02;
+	control |= integrationTime << 2;
+	if(sleep) {
+		control |= 0x01;
+	}
+//	NRF_LOG_DEBUG("control: %d", control);
+
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+    // Write default coefficients, maybe later read and overwrite with product-calibrated ones
+    uint8_t cmd[] = {control	};
+    err_code = nrf_drv_twi_tx(&m_twi, VEML6070_ADDR_L, cmd, sizeof(cmd), false);
+    if (err_code) {	// handle error outside
+    	NRF_LOG_WARNING("** WARNING in UVA_set_control(), err_code: %d **", err_code);
+    	return err_code;
+    }
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+    return err_code;
+
+}
+
+// UVA Read
+static ret_code_t UVA_read() {
+
+	uint8_t msb;
+	uint8_t lsb;
+//	uint8_t reg0;
+
+    nrf_drv_twi_enable(&m_twi);		// for saving power
+
+
+    // Get the MSB from one address and register
+//    reg0 = 0x00;
+//    err_code = nrf_drv_twi_tx(&m_twi, VEML6070_ADDR_H, &reg0, sizeof(reg0), true);
+//    if (err_code) {	// handle error outside
+//    	return err_code;
+//    }
+////    APP_ERROR_CHECK(err_code);
+//    // Read the value from that register
+	err_code = nrf_drv_twi_rx(&m_twi, VEML6070_ADDR_H, &msb, 1);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+//	NRF_LOG_DEBUG("msb: %d", msb);
+//	APP_ERROR_CHECK(err_code);
+
+    // Now get the LSB from another address and register
+//    reg0 = 0x01;
+//    err_code = nrf_drv_twi_tx(&m_twi, VEML6070_ADDR_L, &reg0, sizeof(reg0), true);
+//    if (err_code) {	// handle error outside
+//    	return err_code;
+//    }
+////    APP_ERROR_CHECK(err_code);
+//    // Read the value from that register
+	err_code = nrf_drv_twi_rx(&m_twi, VEML6070_ADDR_L, &lsb, 1);
+    if (err_code) {	// handle error outside
+    	return err_code;
+    }
+//	NRF_LOG_DEBUG("lsb: %d", lsb);
+//	APP_ERROR_CHECK(err_code);
+
+
+    nrf_drv_twi_disable(&m_twi);		// for saving power
+
+
+    // Convert and store the values
+    UVA_value = (msb << 8) | lsb;
+
+    return err_code;
+
+}
+
+
+
 // Read Small Plantower with TWI (I2C)
 static ret_code_t read_plantower_twi()
 {
@@ -3988,6 +4273,23 @@ void get_data() {
 	if (using_component(FUEL_GAUGE, components_used)) {
 		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
 	}
+	// Init Ambient Light Sensor
+	if (using_component(AMBIENT_LTR, components_used)) {
+		// Init sensor
+		nrf_delay_ms(100);	// Required startup wait
+		ambient_light_set_meas_rate(LTR329_integration_time, LTR329_meas_rate);
+		ambient_light_set_control(LTR329_gain, false, true);
+//		nrf_delay_ms(10);	// Wakeup time (Datasheet, but doesn't work if too small)
+		nrf_delay_ms(100);	// Wakeup time
+	}
+	// UVA Sensor
+	if (using_component(UVA_VEML, components_used)) {
+		// Init sensor
+//		nrf_delay_ms(1000);	// wait for some measurements
+		UVA_set_control(UVA_integration_time, false);
+//		nrf_delay_ms(1000);	// wait for some measurements
+	}
+
 //	// ADC setup
 //    saadc_init();
 
@@ -4327,6 +4629,53 @@ void get_data() {
 		NRF_LOG_INFO("UV_SI1145_UV_value: %d", UV_SI1145_UV_value);
 	}
 
+	// Ambient Light Sensor LTR-329ALS-01, TWI (I2C)
+	if (using_component(AMBIENT_LTR, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Testing Ambient Light Sensor with I2C/TWI...");
+		NRF_LOG_INFO("--------------------------------------------");
+
+//		// Init sensor
+//		ambient_light_set_meas_rate(LTR329_integration_time, LTR329_meas_rate);
+//		ambient_light_set_control(LTR329_gain, false, true);
+//		nrf_delay_ms(200);	// wait for some measurements
+
+		// Read the data
+		err_code = ambient_light_read();
+		if (err_code) {
+			NRF_LOG_ERROR("** ERROR: ambient_light_read(), err_code=%d **", err_code);
+			ambient_CH0 = 0;
+			ambient_CH1 = 0;
+			err_cnt++;
+		}
+		NRF_LOG_INFO("ambient_CH0: %d", ambient_CH0);
+		NRF_LOG_INFO("ambient_CH1: %d", ambient_CH1);
+	}
+
+	// UVA Sensor, TWI (I2C)
+	if (using_component(UVA_VEML, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("UVA with I2C/TWI...");
+		NRF_LOG_INFO("-------------------");
+
+//		// Init sensor
+//		nrf_delay_ms(1000);	// wait for some measurements
+//		UVA_set_control(UVA_integration_time, false);
+//		nrf_delay_ms(1000);	// wait for some measurements
+
+		// Read the data
+		err_code = UVA_read();
+		if (err_code) {
+			NRF_LOG_ERROR("** ERROR: UVA_read(), err_code=%d **", err_code);
+			UVA_value = 0;
+			err_cnt++;
+		}
+		NRF_LOG_INFO("UVA_value: %d", UVA_value);
+
+
+	}
+
+
 //NRF_LOG_DEBUG("--ST");
 //if (0) {
 
@@ -4377,8 +4726,17 @@ void get_data() {
 		fuel_gauge_sleep();	// Turn off to save power
 	}
 	NRF_LOG_DEBUG("--AFGS");
+	// Sleep Ambient Light Sensor
+	if (using_component(AMBIENT_LTR, components_used)) {
+		ambient_light_set_control(LTR329_gain, false, false);
+	}
+	// Sleep UVA Sensor
+	if (using_component(UVA_VEML, components_used)) {
+		UVA_set_control(UVA_integration_time, true);
+	}
 //	// TWI (I2C) UNinit
 //    nrf_drv_twi_uninit(&m_twi);
+
 
 
     // ADP High Power sleep, turn OFF power to high power sensors
@@ -4999,21 +5357,34 @@ int main(void) {
 	sd_power_on();
 	sd_init();
 	sd_mount();
-	FRESULT ff_result_stat = f_stat(SETTINGS_FILE_NAME, NULL);
+
+	// The initial values stored on the SD card
+	FRESULT ff_result_stat = f_stat(VALUES_FILE_NAME, NULL);
 	if (ff_result_stat == FR_NO_FILE) {
 		// File doesn't exist, so make a new one
 		NRF_LOG_INFO("Writing new config file..");
-		ff_result = sd_settings_create();
-		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_settings_create() ff_result: %d", ff_result);
+//		ff_result = sd_values_create();
+		ff_result = sd_values_update();
+		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_values_create() ff_result: %d", ff_result);
+	    sd_close();
 	} else if(ff_result_stat == FR_OK) {
-		if (READING_SETTINGS_FILE) {
+		if (READING_VALUES_FILE) {
 			NRF_LOG_INFO("Reading in previous config file..");
-			ff_result = sd_settings_read();
-			if (ff_result != FR_OK) NRF_LOG_WARNING("sd_settings_read() ff_result: %d", ff_result);
+			ff_result = sd_values_read();
+			if (ff_result != FR_OK) NRF_LOG_WARNING("sd_values_read() ff_result: %d", ff_result);
+		    sd_close();
 		}
 	} else {
 		NRF_LOG_WARNING("ff_result_stat: %d", ff_result_stat);
 	}
+
+	// Make an info file that saves some settings for user to see later
+	NRF_LOG_INFO("Creating info file..");
+	ff_result = sd_info_create();
+	if (ff_result != FR_OK) NRF_LOG_WARNING("sd_values_create() ff_result: %d", ff_result);
+
+	// Clean up SD card stuff
+	sd_close();
 	sd_uninit();
 	sd_power_off();
 
@@ -5059,17 +5430,18 @@ int main(void) {
 			NRF_LOG_DEBUG("end_byte: %d", end_byte);
 
 //			// Update the Config file
-//			updating_settings_file = true;
+//			updating_values_file = true;
 ////			f_close(&file);
-////			sd_settings_update();
+////			sd_values_update();
 
         	// Uninitialize here, since don't want to interfere with another SDC operation
+		    sd_close();
         	sd_uninit();
         	sd_power_off();
 
         	updating_end_byte = false;
         }
-        if (updating_settings_file) {
+        if (updating_values_file) {
 
 			// Start the SD card
 			sd_power_on();
@@ -5077,13 +5449,14 @@ int main(void) {
 			sd_mount();
 
 			// Update Config file
-			sd_settings_update();
+			sd_values_update();
 
 			// Start the SD card
+		    sd_close();
 			sd_uninit();
 			sd_power_off();
 
-			updating_settings_file = false;	// reset flag
+			updating_values_file = false;	// reset flag
         }
         if (start_sending_sdc_data) {
 			send_sdc_data();
