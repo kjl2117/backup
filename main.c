@@ -130,23 +130,23 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-//static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
-static uint32_t log_interval = 10*1000;	// units: ms
+static uint32_t log_interval = 60*1000;	//60*1000;	// units: ms
+//static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define PLANTOWER_STARTUP_WAIT_TIME		30*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
-//#define SPEC_CO_STARTUP_WAIT_TIME		10*1000	//ms,	Response time < 30s (15s typical)
+#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
+#define SPEC_CO_STARTUP_WAIT_TIME		12*1000	//ms,	Response time < 30s (15s typical)
 //#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
-#define SPEC_CO_STARTUP_WAIT_TIME		5*1000	//3*1000	//ms
+//#define SPEC_CO_STARTUP_WAIT_TIME		5*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
-#define FIGARO_CO2_STARTUP_WAIT_TIME	3*1000	// 2*1000 is too small, only reading value==360
+#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
 
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
@@ -1568,7 +1568,7 @@ void save_data(void) {
 	// Save different strings depending on the device
 	#if PRODUCT_TYPE == SUM
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, ambient_CH0, ambient_CH1, UVA_value, fuel_v_cell, fuel_percent);
-		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
+		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == HAP
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
@@ -4308,7 +4308,7 @@ void get_data() {
 //		nrf_delay_ms(10);	// Wakeup time (Datasheet, but doesn't work if too small)
 		nrf_delay_ms(100);	// Wakeup time
 	}
-	// UVA Sensor
+	// Init UVA Sensor
 	if (using_component(UVA_VEML, components_used)) {
 		// Init sensor
 //		nrf_delay_ms(1000);	// wait for some measurements
