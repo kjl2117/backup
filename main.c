@@ -154,6 +154,7 @@ static uint32_t log_interval = 10*1000;	// units: ms
 //#define DEVICE_NAME                     "BATTERY_UART"                               /**< Name of device. Will be included in the advertising data. */
 #define VALUES_FILE_NAME   "_values.txt"
 #define INFO_FILE_NAME   "info.txt"
+#define EXTRA_LOG_FILE_NAME   "extralog.txt"
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
 #define BLE_TEST_FILE_NAME   "ble_150k.TXT"	//"ble_150k.TXT"	//"ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
@@ -333,11 +334,14 @@ static ret_code_t err_code;
 #define FILE_NAME   "datalog.txt"
 #define MAX_OUT_STR_SIZE	200
 #if PRODUCT_TYPE == SUM
-	#define FILE_HEADER	"Time, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, UVA_value, fuel_v_cell, fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #elif PRODUCT_TYPE == HAP
-	#define FILE_HEADER	"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+	#define FILE_HEADER			"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #else
-	#define FILE_HEADER	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 #endif
 
 /** SD Card Data Offload Variables **/
@@ -1551,10 +1555,11 @@ void save_data(void) {
     // Write header to SD
     if (!header_is_written) {
     	sd_write_str(FILE_HEADER);
-    	header_is_written = 1;
+//    	header_is_written = 1;
     }
 
     char out_str[MAX_OUT_STR_SIZE];
+    char extra_str[MAX_OUT_STR_SIZE];
 //	NRF_LOG_DEBUG("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
 	NRF_LOG_FLUSH();
 //    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
@@ -1562,21 +1567,36 @@ void save_data(void) {
 
 	// Save different strings depending on the device
 	#if PRODUCT_TYPE == SUM
-		int out_str_size = sprintf(out_str, "%ld,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu\r\n",time_now, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, ambient_CH0, ambient_CH1, UVA_value, fuel_v_cell, fuel_percent);
+		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == HAP
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent);
+		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#else
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
     // Make sure buffer was big enough and didn't spill over
-    if (out_str_size > MAX_OUT_STR_SIZE) {
-    	NRF_LOG_ERROR("** ERROR: out_str too big!, out_str_size=%d", out_str_size);
+    if (out_str_size > MAX_OUT_STR_SIZE || extra_str_size > MAX_OUT_STR_SIZE) {
+    	NRF_LOG_ERROR("** ERROR: output string too big!, out_str_size=%d, extra_str_size: %d", out_str_size, extra_str_size);
     	err_cnt++;
     }
 
     sd_write_str(out_str);
+    sd_close();
+
+
+    // Now do the Extra log
+    sd_open(EXTRA_LOG_FILE_NAME, FA_READ | FA_WRITE | FA_OPEN_APPEND);
+    // Write header to SD
+    if (!header_is_written) {
+    	sd_write_str(FILE_HEADER_EXTRA);
+    	header_is_written = 1;
+    }
+    sd_write_str(extra_str);
+
 
 
 
