@@ -705,6 +705,7 @@ static ble_gap_addr_t ble_gap_address;
 #define BLE_UUID_SENSEN_SERVICE				0x7373 // "ss"
 #define BLE_UUID_SUM_SERVICE				0x736d // "sm"
 #define BLE_UUID_HAP_SERVICE				0x6870 // "hp"
+#define BLE_UUID_CUSTOM_SERVICE				0x636d // "cm"
 
 #define BLE_UUID_OUR_CHARACTERISTIC_UUID		0xBEEF // Custom (from example)
 #define BLE_UUID_FW_VER_CHARACTERISTIC			0x0000 // The Firmware Version
@@ -2004,7 +2005,7 @@ static void services_init(void)
 
     // All Services if unspecified
 #else
-    custom_service_init(&product_service, BLE_UUID_HAP_SERVICE);
+    custom_service_init(&product_service, BLE_UUID_CUSTOM_SERVICE);
     custom_char_add(&product_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&product_service.fw_ver_handles, 	(uint8_t *) &product_FW_version, 	sizeof(product_FW_version),		1,0,	0);
     custom_char_add(&product_service, BLE_UUID_PM2_5_CHARACTERISTIC, 		&product_service.pm2_5_handles, 	(uint8_t *) &plantower_2_5_value, 	sizeof(plantower_2_5_value),	1,0,	1);
     custom_char_add(&product_service, BLE_UUID_PM10_CHARACTERISTIC, 		&product_service.pm10_handles, 		(uint8_t *) &plantower_10_value, 	sizeof(plantower_10_value),		1,0,	1);
