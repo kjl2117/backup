@@ -219,6 +219,8 @@ typedef enum {
 	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "SUM_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR		"SUM"
+	static char product_FW_version[] = 		"SUM_v1.00";
+	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -238,6 +240,8 @@ typedef enum {
 	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "HAP_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR		"HAP"
+	static char product_FW_version[] = 		"HAP_v1.00";
+	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
 //		ADP,		// DIG
@@ -259,6 +263,8 @@ typedef enum {
 	static uint16_t min_battery_level = 0;	// units: percent*1000
 	#define DEVICE_NAME                     "BATT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR		"BATTERY_TEST"
+	static char product_FW_version[] = 		"BATTERY_TEST_v1.00";
+	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #elif PRODUCT_TYPE == WAIT_TIME_TEST
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -280,6 +286,8 @@ typedef enum {
 	static uint16_t min_battery_level = 0;	// units: percent*1000
 	#define DEVICE_NAME                     "WAIT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR		"WAIT_TIME_TEST"
+	static char product_FW_version[] = 		"WAIT_TIME_TEST_v1.00";
+	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #else
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -302,7 +310,9 @@ typedef enum {
 	static battery_type battery_type_used = BAT_LIPO_10Ah;
 	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "UART_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
-	#define PRODUCT_STR		"OTHER"
+	#define PRODUCT_STR		"CUSTOM"
+	static char product_FW_version[] = 		"CUSTOM_v1.00";
+	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
@@ -334,14 +344,14 @@ static ret_code_t err_code;
 #define FILE_NAME   "datalog.txt"
 #define MAX_OUT_STR_SIZE	200
 #if PRODUCT_TYPE == SUM
-	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, UVA_value, fuel_v_cell, fuel_percent\r\n"
+	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent\r\n"
 	#define FILE_HEADER_EXTRA	"Time, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #elif PRODUCT_TYPE == HAP
 	#define FILE_HEADER			"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent\r\n"
 	#define FILE_HEADER_EXTRA	"Time, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #else
-	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
-	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, UVA_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 #endif
 
 /** SD Card Data Offload Variables **/
@@ -541,7 +551,7 @@ static uint16_t ambient_CH1;
 #define VEML6070_ADDR_H 0x39 ///< High address
 #define VEML6070_ADDR_L 0x38 ///< Low address
 static uint8_t UVA_integration_time = 3;	// default 1
-static uint16_t UVA_value;
+static uint16_t uva_value;
 
 
 
@@ -720,11 +730,14 @@ static ble_gap_addr_t ble_gap_address;
 #define BLE_UUID_TEMP_BME_CHARACTERISTIC		0x0025 // The Firmware Version
 #define BLE_UUID_TEMP_RTC_CHARACTERISTIC		0x0026 // The Firmware Version
 #define BLE_UUID_TEMP_NRF_CHARACTERISTIC		0x0027 // The Firmware Version
+#define BLE_UUID_AMBIENT_CH0_CHARACTERISTIC		0x0028 // The Firmware Version
+#define BLE_UUID_AMBIENT_CH1_CHARACTERISTIC		0x0029 // The Firmware Version
+#define BLE_UUID_UVA_CHARACTERISTIC				0x002A // The Firmware Version
 
 // FW versions
 static char sensen_FW_version[] = 	"SS_v1.00";
-static char SUM_FW_version[] = 		"SUM_v1.00";
-static char HAP_FW_version[] = 		"HAP_v1.00";
+//static char SUM_FW_version[] = 		"SUM_v1.00";
+//static char HAP_FW_version[] = 		"HAP_v1.00";
 
 // Sensen Service values
 static bool is_logging = false;			// Whether we are currently logging
@@ -733,7 +746,7 @@ static bool is_logging = false;			// Whether we are currently logging
 //static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
 static int32_t time_to_be_set = 0;
 static bool is_live_streaming = false;	// Used to skip stuff we don't want when live streaming
-#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+//#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #define APP_PUSH_RETRY_NUM			5
 
 #define DATA_OFFLOAD_PACKET_SIZE	20
@@ -763,27 +776,34 @@ typedef struct
 	ble_gatts_char_handles_t    pm10_handles;
 	ble_gatts_char_handles_t    co_handles;
 	ble_gatts_char_handles_t    co2_handles;
+	ble_gatts_char_handles_t    rh_handles;
 	ble_gatts_char_handles_t    temp_bme_handles;
 	ble_gatts_char_handles_t    temp_rtc_handles;
 	ble_gatts_char_handles_t    temp_nrf_handles;
-	ble_gatts_char_handles_t    rh_handles;
+	ble_gatts_char_handles_t    ambient_CH0_handles;
+	ble_gatts_char_handles_t    ambient_CH1_handles;
+	ble_gatts_char_handles_t    uva_handles;
 } ble_custom_service_t;
 
 static ble_custom_service_t m_SS_service;
-static ble_custom_service_t m_SUM_service;
-static ble_custom_service_t m_HAP_service;
+//static ble_custom_service_t * p_product_specific_service;
+static ble_custom_service_t product_service;
 
-#if PRODUCT_TYPE == SUM
-	static ble_custom_service_t * p_product_specific_service = &m_SUM_service;
-#elif PRODUCT_TYPE == HAP
-	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
-#elif PRODUCT_TYPE == BATTERY_TEST
-	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
-#elif PRODUCT_TYPE == WAIT_TIME_TEST
-	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
-#else
-	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
-#endif
+
+//static ble_custom_service_t m_SUM_service;
+//static ble_custom_service_t m_HAP_service;
+//
+//#if PRODUCT_TYPE == SUM
+//	static ble_custom_service_t * p_product_specific_service = &m_SUM_service;
+//#elif PRODUCT_TYPE == HAP
+//	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+//#elif PRODUCT_TYPE == BATTERY_TEST
+//	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+//#elif PRODUCT_TYPE == WAIT_TIME_TEST
+//	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+//#else
+//	static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
+//#endif
 
 //static ble_custom_service_t * p_product_specific_service = &m_HAP_service;
 ////static ble_custom_service_t * p_product_specific_service = &m_SUM_service;
@@ -938,7 +958,7 @@ static uint32_t custom_char_add(	ble_custom_service_t * p_our_service,
                                        &char_md,
                                        &attr_char_value,
 									   p_our_char_handles);
-//    NRF_LOG_DEBUG("custom_uuid: 0x%x", custom_uuid);
+    NRF_LOG_DEBUG("custom_uuid: 0x%x", custom_uuid);
     APP_ERROR_CHECK(err_code);
 
     printf("\r\nService handle: %#x\n\r", p_our_service->service_handle);
@@ -1114,12 +1134,12 @@ ret_code_t timer_timeout_handler(void * p_context)
 
 
     // Plantower PM2_5
-    if (p_product_specific_service->pm2_5_handles.is_enabled) {
+    if (product_service.pm2_5_handles.is_enabled) {
 		static int16_t previous_plantower_2_5_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(plantower_2_5_value != previous_plantower_2_5_value) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->pm2_5_handles, &plantower_2_5_value, sizeof(plantower_2_5_value));
+			err_code = custom_characteristic_update(&product_service, &product_service.pm2_5_handles, &plantower_2_5_value, sizeof(plantower_2_5_value));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				return err_code;
@@ -1130,12 +1150,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     }
 
     // Plantower PM10
-    if (p_product_specific_service->pm10_handles.is_enabled) {
+    if (product_service.pm10_handles.is_enabled) {
 		static int16_t previous_plantower_10_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(plantower_10_value != previous_plantower_10_value) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->pm10_handles, &plantower_10_value, sizeof(plantower_10_value));
+			err_code = custom_characteristic_update(&product_service, &product_service.pm10_handles, &plantower_10_value, sizeof(plantower_10_value));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
@@ -1147,12 +1167,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     }
 
     // Spec CO
-    if (p_product_specific_service->co_handles.is_enabled) {
+    if (product_service.co_handles.is_enabled) {
 		static int16_t previous_specCO_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(specCO_value != previous_specCO_value) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->co_handles, &specCO_value, sizeof(specCO_value));
+			err_code = custom_characteristic_update(&product_service, &product_service.co_handles, &specCO_value, sizeof(specCO_value));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
@@ -1164,12 +1184,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     }
 
     // Figaro CO2
-    if (p_product_specific_service->co2_handles.is_enabled) {
+    if (product_service.co2_handles.is_enabled) {
 		static int16_t previous_figCO2_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(figCO2_value != previous_figCO2_value) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->co2_handles, &figCO2_value, sizeof(figCO2_value));
+			err_code = custom_characteristic_update(&product_service, &product_service.co2_handles, &figCO2_value, sizeof(figCO2_value));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
@@ -1180,13 +1200,30 @@ ret_code_t timer_timeout_handler(void * p_context)
 	    }
     }
 
+    // BME Humidity
+    if (product_service.rh_handles.is_enabled) {
+		static int16_t previous_bme_humidity = 0; // Declare a variable to store current temperature until next measurement.
+		// Check if current value is different from last value
+	    if(bme_humidity != previous_bme_humidity) {
+			// If new value then send notification
+			err_code = custom_characteristic_update(&product_service, &product_service.rh_handles, &bme_humidity, sizeof(bme_humidity));
+			if (err_code != NRF_SUCCESS) {
+				NRF_LOG_WARNING("err_code: %d", err_code);
+				APP_ERROR_CHECK(err_code);
+				return err_code;
+			} else {
+				previous_bme_humidity = bme_humidity;	// update previous value
+			}
+	    }
+    }
+
     // BME Temp
-    if (p_product_specific_service->temp_bme_handles.is_enabled) {
+    if (product_service.temp_bme_handles.is_enabled) {
 		static int16_t previous_bme_temp_C = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(bme_temp_C != previous_bme_temp_C) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->temp_bme_handles, &bme_temp_C, sizeof(bme_temp_C));
+			err_code = custom_characteristic_update(&product_service, &product_service.temp_bme_handles, &bme_temp_C, sizeof(bme_temp_C));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
@@ -1198,12 +1235,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     }
 
     // RTC Temp
-    if (p_product_specific_service->temp_rtc_handles.is_enabled) {
+    if (product_service.temp_rtc_handles.is_enabled) {
 		static int16_t previous_rtc_temp = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(rtc_temp != previous_rtc_temp) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->temp_rtc_handles, &rtc_temp, sizeof(rtc_temp));
+			err_code = custom_characteristic_update(&product_service, &product_service.temp_rtc_handles, &rtc_temp, sizeof(rtc_temp));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
@@ -1215,12 +1252,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     }
 
     // nRF Temp
-    if (p_product_specific_service->temp_nrf_handles.is_enabled) {
+    if (product_service.temp_nrf_handles.is_enabled) {
 		static int16_t previous_temp_nrf = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(temp_nrf != previous_temp_nrf) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->temp_nrf_handles, &temp_nrf, sizeof(temp_nrf));
+			err_code = custom_characteristic_update(&product_service, &product_service.temp_nrf_handles, &temp_nrf, sizeof(temp_nrf));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
@@ -1231,22 +1268,57 @@ ret_code_t timer_timeout_handler(void * p_context)
 	    }
     }
 
-    // BME Humidity
-    if (p_product_specific_service->rh_handles.is_enabled) {
-		static int16_t previous_bme_humidity = 0; // Declare a variable to store current temperature until next measurement.
+	// Ambient Light CH0
+    if (product_service.ambient_CH0_handles.is_enabled) {
+		static int16_t previous_ambient_CH0 = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
-	    if(bme_humidity != previous_bme_humidity) {
+	    if(ambient_CH0 != previous_ambient_CH0) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(p_product_specific_service, &p_product_specific_service->rh_handles, &bme_humidity, sizeof(bme_humidity));
+			err_code = custom_characteristic_update(&product_service, &product_service.ambient_CH0_handles, &ambient_CH0, sizeof(ambient_CH0));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
 				return err_code;
 			} else {
-				previous_bme_humidity = bme_humidity;	// update previous value
+				previous_ambient_CH0 = ambient_CH0;	// update previous value
 			}
 	    }
     }
+
+	// Ambient Light CH1
+    if (product_service.ambient_CH1_handles.is_enabled) {
+		static int16_t previous_ambient_CH1 = 0; // Declare a variable to store current temperature until next measurement.
+		// Check if current value is different from last value
+	    if(ambient_CH1 != previous_ambient_CH1) {
+			// If new value then send notification
+			err_code = custom_characteristic_update(&product_service, &product_service.ambient_CH1_handles, &ambient_CH1, sizeof(ambient_CH1));
+			if (err_code != NRF_SUCCESS) {
+				NRF_LOG_WARNING("err_code: %d", err_code);
+				APP_ERROR_CHECK(err_code);
+				return err_code;
+			} else {
+				previous_ambient_CH1 = ambient_CH1;	// update previous value
+			}
+	    }
+    }
+
+	// UVA
+    if (product_service.uva_handles.is_enabled) {
+		static int16_t previous_UVA_value = 0; // Declare a variable to store current temperature until next measurement.
+		// Check if current value is different from last value
+	    if(uva_value != previous_UVA_value) {
+			// If new value then send notification
+			err_code = custom_characteristic_update(&product_service, &product_service.uva_handles, &uva_value, sizeof(uva_value));
+			if (err_code != NRF_SUCCESS) {
+				NRF_LOG_WARNING("err_code: %d", err_code);
+				APP_ERROR_CHECK(err_code);
+				return err_code;
+			} else {
+				previous_UVA_value = uva_value;	// update previous value
+			}
+	    }
+    }
+
 
 
 	NRF_LOG_DEBUG("OUT timer_timeout_handler()");
@@ -1567,14 +1639,14 @@ void save_data(void) {
 
 	// Save different strings depending on the device
 	#if PRODUCT_TYPE == SUM
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, ambient_CH0, ambient_CH1, UVA_value, fuel_v_cell, fuel_percent);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == HAP
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#else
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, UVA_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -1911,23 +1983,46 @@ static void services_init(void)
 //    our_char_add(&m_SS_service);
 
     // SUM Service
-    custom_service_init(&m_SUM_service, BLE_UUID_SUM_SERVICE);
-    custom_char_add(&m_SUM_service, BLE_UUID_FW_VER_CHARACTERISTIC,			&m_SUM_service.fw_ver_handles, 		(uint8_t *) &SUM_FW_version, 		sizeof(SUM_FW_version),			1,0,	0);
-    custom_char_add(&m_SUM_service, BLE_UUID_TEMP_RTC_CHARACTERISTIC, 		&m_SUM_service.temp_rtc_handles, 	(uint8_t *) &rtc_temp, 				sizeof(rtc_temp),				1,0,	1);
+#if PRODUCT_TYPE == SUM	// Can't add all products because we run out of memory for Charx's
+    custom_service_init(&product_service, BLE_UUID_SUM_SERVICE);
+    custom_char_add(&product_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&product_service.fw_ver_handles, 	(uint8_t *) &product_FW_version, 	sizeof(product_FW_version),		1,0,	0);
+    custom_char_add(&product_service, BLE_UUID_TEMP_RTC_CHARACTERISTIC, 	&product_service.temp_rtc_handles, 	(uint8_t *) &rtc_temp, 				sizeof(rtc_temp),				1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_AMBIENT_CH0_CHARACTERISTIC, 	&product_service.ambient_CH0_handles, (uint8_t *) &ambient_CH0, 		sizeof(ambient_CH0),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_AMBIENT_CH1_CHARACTERISTIC, 	&product_service.ambient_CH1_handles, (uint8_t *) &ambient_CH1, 		sizeof(ambient_CH1),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_UVA_CHARACTERISTIC, 			&product_service.uva_handles, 		(uint8_t *) &uva_value, 			sizeof(uva_value),				1,0,	1);
 
     // HAP Service
-    custom_service_init(&m_HAP_service, BLE_UUID_HAP_SERVICE);
-    custom_char_add(&m_HAP_service, BLE_UUID_FW_VER_CHARACTERISTIC,			&m_HAP_service.fw_ver_handles, 		(uint8_t *) &HAP_FW_version, 		sizeof(HAP_FW_version),			1,0,	0);
-    custom_char_add(&m_HAP_service, BLE_UUID_PM2_5_CHARACTERISTIC, 			&m_HAP_service.pm2_5_handles, 		(uint8_t *) &plantower_2_5_value, 	sizeof(plantower_2_5_value),	1,0,	1);
-    custom_char_add(&m_HAP_service, BLE_UUID_PM10_CHARACTERISTIC, 			&m_HAP_service.pm10_handles, 		(uint8_t *) &plantower_10_value, 	sizeof(plantower_10_value),		1,0,	1);
-    custom_char_add(&m_HAP_service, BLE_UUID_CO_CHARACTERISTIC, 			&m_HAP_service.co_handles, 			(uint8_t *) &specCO_value, 			sizeof(specCO_value),			1,0,	1);
-    custom_char_add(&m_HAP_service, BLE_UUID_CO2_CHARACTERISTIC, 			&m_HAP_service.co2_handles, 		(uint8_t *) &figCO2_value, 			sizeof(figCO2_value),			1,0,	1);
-    custom_char_add(&m_HAP_service, BLE_UUID_RH_CHARACTERISTIC, 			&m_HAP_service.rh_handles, 			(uint8_t *) &bme_humidity, 			sizeof(bme_humidity),			1,0,	1);
-    custom_char_add(&m_HAP_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 		&m_HAP_service.temp_bme_handles, 	(uint8_t *) &bme_temp_C, 			sizeof(bme_temp_C),				1,0,	1);
+#elif PRODUCT_TYPE == HAP
+    custom_service_init(&product_service, BLE_UUID_HAP_SERVICE);
+    custom_char_add(&product_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&product_service.fw_ver_handles, 	(uint8_t *) &product_FW_version, 	sizeof(product_FW_version),		1,0,	0);
+    custom_char_add(&product_service, BLE_UUID_PM2_5_CHARACTERISTIC, 		&product_service.pm2_5_handles, 	(uint8_t *) &plantower_2_5_value, 	sizeof(plantower_2_5_value),	1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_PM10_CHARACTERISTIC, 		&product_service.pm10_handles, 		(uint8_t *) &plantower_10_value, 	sizeof(plantower_10_value),		1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_CO_CHARACTERISTIC, 			&product_service.co_handles, 		(uint8_t *) &specCO_value, 			sizeof(specCO_value),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_CO2_CHARACTERISTIC, 			&product_service.co2_handles, 		(uint8_t *) &figCO2_value, 			sizeof(figCO2_value),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_humidity, 			sizeof(bme_humidity),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_temp_C, 			sizeof(bme_temp_C),				1,0,	1);
+
+    // All Services if unspecified
+#else
+    custom_service_init(&product_service, BLE_UUID_HAP_SERVICE);
+    custom_char_add(&product_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&product_service.fw_ver_handles, 	(uint8_t *) &product_FW_version, 	sizeof(product_FW_version),		1,0,	0);
+    custom_char_add(&product_service, BLE_UUID_PM2_5_CHARACTERISTIC, 		&product_service.pm2_5_handles, 	(uint8_t *) &plantower_2_5_value, 	sizeof(plantower_2_5_value),	1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_PM10_CHARACTERISTIC, 		&product_service.pm10_handles, 		(uint8_t *) &plantower_10_value, 	sizeof(plantower_10_value),		1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_CO_CHARACTERISTIC, 			&product_service.co_handles, 		(uint8_t *) &specCO_value, 			sizeof(specCO_value),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_CO2_CHARACTERISTIC, 			&product_service.co2_handles, 		(uint8_t *) &figCO2_value, 			sizeof(figCO2_value),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_humidity, 			sizeof(bme_humidity),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_temp_C, 			sizeof(bme_temp_C),				1,0,	1);
+
+    custom_char_add(&product_service, BLE_UUID_TEMP_RTC_CHARACTERISTIC, 	&product_service.temp_rtc_handles, 	(uint8_t *) &rtc_temp, 				sizeof(rtc_temp),				1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_AMBIENT_CH0_CHARACTERISTIC, 	&product_service.ambient_CH0_handles, (uint8_t *) &ambient_CH0, 		sizeof(ambient_CH0),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_AMBIENT_CH1_CHARACTERISTIC, 	&product_service.ambient_CH1_handles, (uint8_t *) &ambient_CH1, 		sizeof(ambient_CH1),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_UVA_CHARACTERISTIC, 			&product_service.uva_handles, 		(uint8_t *) &uva_value, 			sizeof(uva_value),				1,0,	1);
+
+#endif
 
 //    custom_char_add(&m_SS_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&m_SS_service.fw_ver_handles, 	(uint8_t *) &sensen_FW_version, 	sizeof(sensen_FW_version),		1,0,0);
-//    custom_char_add(&m_SUM_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&m_SUM_service.fw_ver_handles, 	(uint8_t *) &SUM_FW_version, 		sizeof(SUM_FW_version),			1,0,0);
-//    custom_char_add(&m_SUM_service, BLE_UUID_TEMP_RTC_CHARACTERISTIC, 	&m_SUM_service.temp_rtc_handles, 	(uint8_t *) &rtc_temp, 				sizeof(rtc_temp),				1,0,1);
+//    custom_char_add(&product_service, BLE_UUID_FW_VER_CHARACTERISTIC,		&product_service.fw_ver_handles, 	(uint8_t *) &product_FW_version, 		sizeof(product_FW_version),			1,0,0);
+//    custom_char_add(&product_service, BLE_UUID_TEMP_RTC_CHARACTERISTIC, 	&product_service.temp_rtc_handles, 	(uint8_t *) &rtc_temp, 				sizeof(rtc_temp),				1,0,1);
 
 }
 
@@ -2080,8 +2175,8 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 //	NRF_LOG_DEBUG("p_our_service: %d", p_our_service);
 //	NRF_LOG_DEBUG("&m_SS_service: %d", &m_SS_service);
-//	NRF_LOG_DEBUG("&m_SUM_service: %d", &m_SUM_service);
-//	NRF_LOG_DEBUG("&m_HAP_service: %d", &m_HAP_service);
+//	NRF_LOG_DEBUG("&product_service: %d", &product_service);
+//	NRF_LOG_DEBUG("&product_service: %d", &product_service);
 
 
 	/**
@@ -2249,6 +2344,18 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 			p_our_service->co2_handles.is_enabled = false;
 			NRF_LOG_INFO("p_our_service->co2_handles.is_enabled: %d", p_our_service->co2_handles.is_enabled);
 		}
+	// BME Humidity
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rh_handles.cccd_handle) {
+		// Get data
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->rh_handles.cccd_handle, &rx_data);
+		// Print handle and value
+		if(data_buffer == 0x0001) {
+			p_our_service->rh_handles.is_enabled = true;
+			NRF_LOG_INFO("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
+		} else if(data_buffer == 0x0000) {
+			p_our_service->rh_handles.is_enabled = false;
+			NRF_LOG_INFO("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
+		}
 	// BME Temp
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->temp_bme_handles.cccd_handle) {
 		// Get data
@@ -2285,17 +2392,41 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 			p_our_service->temp_nrf_handles.is_enabled = false;
 			NRF_LOG_INFO("p_our_service->temp_nrf_handles.is_enabled: %d", p_our_service->temp_nrf_handles.is_enabled);
 		}
-	// BME Humidity
-	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rh_handles.cccd_handle) {
+	// Ambient Light CH0
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->ambient_CH0_handles.cccd_handle) {
 		// Get data
-		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->rh_handles.cccd_handle, &rx_data);
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->ambient_CH0_handles.cccd_handle, &rx_data);
 		// Print handle and value
 		if(data_buffer == 0x0001) {
-			p_our_service->rh_handles.is_enabled = true;
-			NRF_LOG_INFO("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
+			p_our_service->ambient_CH0_handles.is_enabled = true;
+			NRF_LOG_INFO("p_our_service->ambient_CH0_handles.is_enabled: %d", p_our_service->ambient_CH0_handles.is_enabled);
 		} else if(data_buffer == 0x0000) {
-			p_our_service->rh_handles.is_enabled = false;
-			NRF_LOG_INFO("p_our_service->rh_handles.is_enabled: %d", p_our_service->rh_handles.is_enabled);
+			p_our_service->ambient_CH0_handles.is_enabled = false;
+			NRF_LOG_INFO("p_our_service->ambient_CH0_handles.is_enabled: %d", p_our_service->ambient_CH0_handles.is_enabled);
+		}
+	// Ambient Light CH1
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->ambient_CH1_handles.cccd_handle) {
+		// Get data
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->ambient_CH1_handles.cccd_handle, &rx_data);
+		// Print handle and value
+		if(data_buffer == 0x0001) {
+			p_our_service->ambient_CH1_handles.is_enabled = true;
+			NRF_LOG_INFO("p_our_service->ambient_CH1_handles.is_enabled: %d", p_our_service->ambient_CH1_handles.is_enabled);
+		} else if(data_buffer == 0x0000) {
+			p_our_service->ambient_CH1_handles.is_enabled = false;
+			NRF_LOG_INFO("p_our_service->ambient_CH1_handles.is_enabled: %d", p_our_service->ambient_CH1_handles.is_enabled);
+		}
+	// UVA
+	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->uva_handles.cccd_handle) {
+		// Get data
+		err_code = sd_ble_gatts_value_get(p_our_service->conn_handle, p_our_service->uva_handles.cccd_handle, &rx_data);
+		// Print handle and value
+		if(data_buffer == 0x0001) {
+			p_our_service->uva_handles.is_enabled = true;
+			NRF_LOG_INFO("p_our_service->uva_handles.is_enabled: %d", p_our_service->uva_handles.is_enabled);
+		} else if(data_buffer == 0x0000) {
+			p_our_service->uva_handles.is_enabled = false;
+			NRF_LOG_INFO("p_our_service->uva_handles.is_enabled: %d", p_our_service->uva_handles.is_enabled);
 		}
 
 	}
@@ -2308,10 +2439,13 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 			p_our_service->pm10_handles.is_enabled ||
 			p_our_service->co_handles.is_enabled ||
 			p_our_service->co2_handles.is_enabled ||
+			p_our_service->rh_handles.is_enabled ||
 			p_our_service->temp_bme_handles.is_enabled ||
 			p_our_service->temp_rtc_handles.is_enabled ||
 			p_our_service->temp_nrf_handles.is_enabled ||
-			p_our_service->rh_handles.is_enabled
+			p_our_service->ambient_CH0_handles.is_enabled ||
+			p_our_service->ambient_CH1_handles.is_enabled ||
+			p_our_service->uva_handles.is_enabled //||
 			);
 
 	// Temporarily change the logging interval faster
@@ -2501,12 +2635,12 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 
     // Also handle events for our custom services
     ble_custom_service_ble_evt_handler(&m_SS_service, p_ble_evt);
-    ble_custom_service_ble_evt_handler(p_product_specific_service, p_ble_evt);
-//    ble_custom_service_ble_evt_handler(&m_SUM_service, p_ble_evt);
-//    ble_custom_service_ble_evt_handler(&m_HAP_service, p_ble_evt);
+    ble_custom_service_ble_evt_handler(&product_service, p_ble_evt);
+//    ble_custom_service_ble_evt_handler(&product_service, p_ble_evt);
+//    ble_custom_service_ble_evt_handler(&product_service, p_ble_evt);
 
-//    ble_SUM_service_ble_evt_handler(&m_SUM_service, p_ble_evt);
-//    ble_HAP_service_ble_evt_handler(&m_HAP_service, p_ble_evt);
+//    ble_SUM_service_ble_evt_handler(&product_service, p_ble_evt);
+//    ble_HAP_service_ble_evt_handler(&product_service, p_ble_evt);
 }
 
 
@@ -4017,7 +4151,7 @@ static ret_code_t UVA_read() {
 
 
     // Convert and store the values
-    UVA_value = (msb << 8) | lsb;
+    uva_value = (msb << 8) | lsb;
 
     return err_code;
 
@@ -4693,10 +4827,10 @@ void get_data() {
 		err_code = UVA_read();
 		if (err_code) {
 			NRF_LOG_ERROR("** ERROR: UVA_read(), err_code=%d **", err_code);
-			UVA_value = 0;
+			uva_value = 0;
 			err_cnt++;
 		}
-		NRF_LOG_INFO("UVA_value: %d", UVA_value);
+		NRF_LOG_INFO("uva_value: %d", uva_value);
 
 
 	}
