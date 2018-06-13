@@ -135,7 +135,7 @@ static void stop_measurements();
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 60*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 10*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -147,6 +147,7 @@ static uint32_t log_interval = 60*1000;	//60*1000;	// units: ms
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
 #define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+#define FUEL_GAUGE_RCOMP	0x97	// Config value to adjust for Custom batteries
 
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
@@ -158,6 +159,9 @@ static uint32_t log_interval = 60*1000;	//60*1000;	// units: ms
 //#define BLE_TEST_FILE_NAME   "ble_test.TXT"
 //#define BLE_TEST_FILE_NAME   "ble_test_100.TXT"
 #define BLE_TEST_FILE_NAME   "ble_150k.TXT"	//"ble_150k.TXT"	//"ble_2000.TXT"	//"ble_100.TXT"	"ble_2000.TXT"
+#define LOG_FILE_NAME   "datalog.txt"
+static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
+
 #define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
 //#define NUM_SAMPLES_PER_ON_CYCLE	150	//1	//150	// 1,	20
 #define WAIT_BETWEEN_SAMPLES		0	//0	//200	// ms, waitin only if there are multiple samples
@@ -341,7 +345,6 @@ static ret_code_t err_code;
 
 
 /** SD Card Variables.  From example: peripheral/fatfs **/
-#define FILE_NAME   "datalog.txt"
 #define MAX_OUT_STR_SIZE	200
 #if PRODUCT_TYPE == SUM
 	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent\r\n"
@@ -1495,7 +1498,7 @@ void sd_mount() {
 void sd_open(char fname[], BYTE mode) {
 
     // Open SD
-//    NRF_LOG_DEBUG("Opening file " FILE_NAME "...");
+//    NRF_LOG_DEBUG("Opening file " LOG_FILE_NAME "...");
     NRF_LOG_DEBUG("Opening file: %s", fname);
     ff_result = f_open(&file, fname, mode);
     if (ff_result != FR_OK) {
@@ -1623,7 +1626,7 @@ void save_data(void) {
 //    f_close(&file);
 
 
-    sd_open(FILE_NAME, FA_READ | FA_WRITE | FA_OPEN_APPEND);
+    sd_open(LOG_FILE_NAME, FA_READ | FA_WRITE | FA_OPEN_APPEND);
 
     // Write header to SD
     if (!header_is_written) {
@@ -1749,8 +1752,8 @@ static void send_sdc_packets() {
 
 //			sd_init();
 //			sd_mount();
-//	//		sd_open(BLE_TEST_FILE_NAME, FA_READ | FA_WRITE);
-//			sd_open(BLE_TEST_FILE_NAME, FA_READ);
+//	//		sd_open(ble_file_name, FA_READ | FA_WRITE);
+//			sd_open(ble_file_name, FA_READ);
 
 			sdc_read_num++;
 			NRF_LOG_INFO("--READ SDC: sdc_read_num: %d", sdc_read_num);
@@ -1876,8 +1879,8 @@ static void send_sdc_data() {
     sd_power_on();
 	sd_init();
 	sd_mount();
-//		sd_open(BLE_TEST_FILE_NAME, FA_READ | FA_WRITE);
-	sd_open(BLE_TEST_FILE_NAME, FA_READ);
+//		sd_open(ble_file_name, FA_READ | FA_WRITE);
+	sd_open(ble_file_name, FA_READ);
 	// Start where we left off last time
 	f_lseek(&file, start_byte);
 
@@ -2242,7 +2245,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 //		    sd_power_on();
 //			sd_init();
 //			sd_mount();
-//			sd_open(BLE_TEST_FILE_NAME, FA_READ);
+//			sd_open(ble_file_name, FA_READ);
 ////			// Start where we left off last time
 ////			f_lseek(&file, start_byte);
 //			// Get the SD card size
@@ -5583,7 +5586,7 @@ int main(void) {
 			sd_init();
 			sd_mount();
 			// Update the End Byte (file size) that will be sent
-			sd_open(BLE_TEST_FILE_NAME, FA_READ);
+			sd_open(ble_file_name, FA_READ);
 //			// Start where we left off last time
 //			f_lseek(&file, start_byte);
 			// Get the SD card size
