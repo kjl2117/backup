@@ -1814,9 +1814,18 @@ static void send_sdc_packets() {
 			// Check if we read all the SDC and sent the remaining data
 			if (done_reading_sdc && (bytes_remaining == 0) ) {
 				done_sending_sdc = true;
-				is_offloading = false;
 				updating_values_file = true;
 				sdc_read_num = 0;
+				is_offloading = false;
+				// Need to set the value with special function so App gets notified
+//				uint32_t data_buffer = 0;
+				ble_gatts_value_t rx_data;
+				rx_data.len = sizeof(is_offloading);
+				rx_data.offset = 0;
+				rx_data.p_value = (uint8_t*)&is_offloading;
+				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.data_offload_handles.cccd_handle, &rx_data);
+				APP_ERROR_CHECK(err_code);
+
 //				start_sending_sdc_data = false;
 				NRF_LOG_INFO("Final cnt: %d", cnt);
 				NRF_LOG_INFO("Final send_length: %d", send_length);
