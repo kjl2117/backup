@@ -130,23 +130,24 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 10*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 //#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
 #define SPEC_CO_STARTUP_WAIT_TIME		12*1000	//ms,	Response time < 30s (15s typical)
 //#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
-//#define SPEC_CO_STARTUP_WAIT_TIME		5*1000	//3*1000	//ms
+//#define SPEC_CO_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
 #define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+//#define FIGARO_CO2_STARTUP_WAIT_TIME	3*1000	// 2*1000 is too small, only reading value==360
 #define FUEL_GAUGE_RCOMP	0x97	// Config value to adjust for Custom batteries
 
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
@@ -326,6 +327,16 @@ static float battery_scale_factors[] = {
 		2.589,	// BAT_LIPO_10Ah
 };
 //static float battery_scale_factor = battery_scale_factors[battery_type_used];
+static float m_batt[] = {
+		0.001344399,	// BAT_LIPO_1200mAh
+		1.0,			// BAT_LIPO_2000mAh,	NOT USED
+		0.001311254,	// BAT_LIPO_10Ah
+};
+static float b_batt[] = {
+		-4.473748806,	// BAT_LIPO_1200mAh
+		0.0,			// BAT_LIPO_2000mAh,	NOT USED
+		-4.37601246,	// BAT_LIPO_10Ah
+};
 
 
 // Counter variables
@@ -515,8 +526,8 @@ static uint32_t fuel_percent_raw = 0;	// units: percent*1000
 //#define FUEL_SCALE_FACTOR		2.589	// Factor of how much time expansion
 //#define FLOAT_FACTOR			1000
 static uint32_t runtime_estimate = 0;	// units: percent*1000
-static uint32_t fuel_p0 = 0;	// units: percent*1000
-static uint32_t fuel_t0 = 0;	// units: percent*1000
+//static uint32_t fuel_p0 = 0;	// units: percent*1000
+//static uint32_t fuel_t0 = 0;	// units: percent*1000
 #define MAX17043_to_mV	1.25
 //static bool has_quick_started_fuel_gauge = false;
 
@@ -663,7 +674,7 @@ APP_TIMER_DEF(hpm_startup_timer);
 
 //#define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
 //#define APP_ADV_INTERVAL                480                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
-#define APP_ADV_INTERVAL                MSEC_TO_UNITS(1000, UNIT_0_625_MS)                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
+#define APP_ADV_INTERVAL                MSEC_TO_UNITS(1000, UNIT_0_625_MS)                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 1000 ms). */
 //#define APP_ADV_TIMEOUT_IN_SECONDS      180                                         /**< The advertising timeout (in units of seconds). */
 //#define APP_ADV_TIMEOUT_IN_SECONDS      500                                         /**< The advertising timeout (in units of seconds). */
 #define APP_ADV_TIMEOUT_IN_SECONDS      0                                         /**< The advertising timeout (in units of seconds). */
@@ -675,9 +686,11 @@ APP_TIMER_DEF(hpm_startup_timer);
 
 #define SLAVE_LATENCY                   0                                           /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
+//#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(10000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
 #define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000)                       /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000)                      /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
+//#define MAX_CONN_PARAMS_UPDATE_COUNT    10                                           /**< Number of attempts before giving up the connection parameter negotiation. */
 
 #define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
@@ -962,7 +975,7 @@ static uint32_t custom_char_add(	ble_custom_service_t * p_our_service,
                                        &char_md,
                                        &attr_char_value,
 									   p_our_char_handles);
-    NRF_LOG_DEBUG("custom_uuid: 0x%x", custom_uuid);
+//    NRF_LOG_DEBUG("custom_uuid: 0x%x", custom_uuid);
     APP_ERROR_CHECK(err_code);
 
     printf("\r\nService handle: %#x\n\r", p_our_service->service_handle);
@@ -1817,6 +1830,7 @@ static void send_sdc_packets() {
 				updating_values_file = true;
 				sdc_read_num = 0;
 				is_offloading = false;
+
 				// Need to set the value with special function so App gets notified
 //				uint32_t data_buffer = 0;
 				ble_gatts_value_t rx_data;
@@ -3751,88 +3765,98 @@ static ret_code_t read_fuel_gauge() {
 // Adjust or Extrapolate battery fuel percentage for our custom batteries
 static void calc_fuel_percent() {
 
-	//	float FUEL_SCALE_FACTOR = 2.589;
-	float battery_scale_factor = battery_scale_factors[battery_type_used];
-	NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factor*1000);
+
 
 	// Only need to correct for non-standard battery
 	if (battery_type_used != BAT_LIPO_2000mAh) {
-		// Store initial values for later
-		if (t0 == 0) {
-			t0 = time_now;
-		}
-		if (fuel_p0 == 0) {
-//			fuel_t0 = time_now;
-			fuel_p0 = fuel_percent_raw;
 
-////			t0 = time_now - 3600*10;
-//			t0 = time_now - 3600*5;
-////			fuel_t0 = (time_now - 3600*10);
-////			fuel_p0 = 100*1000;
-//			fuel_p0 = 60*1000;
-		}
+		//	float FUEL_SCALE_FACTOR = 2.589;
+		float battery_scale_factor = battery_scale_factors[battery_type_used];
+		float m = m_batt[battery_type_used];
+		float b = b_batt[battery_type_used];
+		NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factor*1000);
+
+		// Use empirical linear fit
+		fuel_percent = 100*1000 * (m*fuel_v_cell + b);
 
 
-//		// FOR TESTING
-//		if (loop_num > 0) fuel_percent_raw = 80*1000;
-//		if (loop_num > 1) fuel_percent_raw = 60*1000;
-//		if (loop_num > 2) fuel_percent_raw = 40*1000;
-//		if (loop_num > 3) fuel_percent_raw = 10*1000;
+
+//		// Store initial values for later
+//		if (t0 == 0) {
+//			t0 = time_now;
+//		}
+//		if (fuel_p0 == 0) {
+////			fuel_t0 = time_now;
+//			fuel_p0 = fuel_percent_raw;
+//
+//////			t0 = time_now - 3600*10;
+////			t0 = time_now - 3600*5;
+//////			fuel_t0 = (time_now - 3600*10);
+//////			fuel_p0 = 100*1000;
+////			fuel_p0 = 60*1000;
+//		}
+//
+//
+////		// FOR TESTING
+////		if (loop_num > 0) fuel_percent_raw = 80*1000;
+////		if (loop_num > 1) fuel_percent_raw = 60*1000;
+////		if (loop_num > 2) fuel_percent_raw = 40*1000;
+////		if (loop_num > 3) fuel_percent_raw = 10*1000;
+////		NRF_LOG_DEBUG("fuel_percent_raw: %d", fuel_percent_raw);
+//
+//
+//
+//		// If above the threshold, adjust the measured value differently
 //		NRF_LOG_DEBUG("fuel_percent_raw: %d", fuel_percent_raw);
-
-
-
-		// If above the threshold, adjust the measured value differently
-		NRF_LOG_DEBUG("fuel_percent_raw: %d", fuel_percent_raw);
-		NRF_LOG_DEBUG("FUEL_PERCENT_THRESHOLD*1000: %d", FUEL_PERCENT_THRESHOLD*1000);
-		if (fuel_percent_raw > FUEL_PERCENT_THRESHOLD*1000) {
-			// Simple attempt: weighted averages of current and initial
-			fuel_percent = fuel_percent_raw/battery_scale_factor + (battery_scale_factor-1)*fuel_p0/battery_scale_factor;
-	//	} else {	// More complicated: extrapolate along a line: (y-y0)=m(x-x0), m=(yL-y0)/(xL-x0), xL=ath*xth
-		} else {	// More complicated: Estimate total runtime and take percentage of that
-			if (runtime_estimate == 0) {	// estimate runtime only the first time it falls below threshold
-				runtime_estimate = (time_now - t0) * battery_scale_factor * ((1.0f*(100-FUEL_PERCENT_THRESHOLD)*1000) / (1.0f*fuel_p0-FUEL_PERCENT_THRESHOLD*1000));	// Later part corrects for not starting at 100% battery
-//				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_percent_raw) / (1.0f*100*1000));
-				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_p0) / (1.0f*100*1000));
-				NRF_LOG_DEBUG("previous fuel_t0: %d", fuel_t0);
-
-				uint32_t max_fuel_percent;
-				if (fuel_p0 > 100*1000) max_fuel_percent = fuel_p0;
-				else max_fuel_percent = 100*1000;
-				fuel_t0 = t0 - runtime_estimate * ((max_fuel_percent - fuel_p0) / (1.0f*max_fuel_percent));
-				NRF_LOG_DEBUG("modified fuel_t0: %d", fuel_t0);
-				NRF_LOG_DEBUG("fuel_p0: %d", fuel_p0);
-
-				fuel_t0 = t0;	// NOTE: This assumes we start with battery ~100%
-			}
-
-			NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
-			NRF_LOG_DEBUG("time_now: %d", time_now);
-			NRF_LOG_DEBUG("t0: %d", t0);
-			NRF_LOG_DEBUG("fuel_t0: %d", fuel_t0);
-			NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
-			NRF_LOG_DEBUG("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
-			NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
-
-			if ((time_now - fuel_t0) > runtime_estimate) {	// set to 0 if already past runtime_estimate
-				fuel_percent = 0;
-				NRF_LOG_DEBUG("set fuel_percent to 0");
-			} else {
-//				NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
-//				NRF_LOG_DEBUG("time_now: %d", time_now);
-//				NRF_LOG_DEBUG("t0: %d", t0);
-//				NRF_LOG_DEBUG("fuel_t0: %d", fuel_t0);
-//				NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
-//				NRF_LOG_DEBUG("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
-//				NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
-
-				// Need to be careful.. don't lose precision (use float), and don't overflow int (break into 2 calcs)
-				float temp = (runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate);	// % of runtime estimate.  Calc separately to avoid uint32 overflow
-				NRF_LOG_DEBUG("temp*1000: %d", temp*1000);
-				NRF_LOG_DEBUG("temp: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(temp));
-				fuel_percent = 1000 * 100*temp;	// 100x b/c %, 1000x for 3 decimal places
-			}
-		}
+//		NRF_LOG_DEBUG("FUEL_PERCENT_THRESHOLD*1000: %d", FUEL_PERCENT_THRESHOLD*1000);
+//		if (fuel_percent_raw > FUEL_PERCENT_THRESHOLD*1000) {
+//			// Simple attempt: weighted averages of current and initial
+//			fuel_percent = fuel_percent_raw/battery_scale_factor + (battery_scale_factor-1)*fuel_p0/battery_scale_factor;
+//	//	} else {	// More complicated: extrapolate along a line: (y-y0)=m(x-x0), m=(yL-y0)/(xL-x0), xL=ath*xth
+//		} else {	// More complicated: Estimate total runtime and take percentage of that
+//			if (runtime_estimate == 0) {	// estimate runtime only the first time it falls below threshold
+//				runtime_estimate = (time_now - t0) * battery_scale_factor * ((1.0f*(100-FUEL_PERCENT_THRESHOLD)*1000) / (1.0f*fuel_p0-FUEL_PERCENT_THRESHOLD*1000));	// Later part corrects for not starting at 100% battery
+////				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_percent_raw) / (1.0f*100*1000));
+//				fuel_t0 = t0 - runtime_estimate * ((100*1000 - fuel_p0) / (1.0f*100*1000));
+//				NRF_LOG_DEBUG("previous fuel_t0: %d", fuel_t0);
+//
+//				uint32_t max_fuel_percent;
+//				if (fuel_p0 > 100*1000) max_fuel_percent = fuel_p0;
+//				else max_fuel_percent = 100*1000;
+//				fuel_t0 = t0 - runtime_estimate * ((max_fuel_percent - fuel_p0) / (1.0f*max_fuel_percent));
+//				NRF_LOG_DEBUG("modified fuel_t0: %d", fuel_t0);
+//				NRF_LOG_DEBUG("fuel_p0: %d", fuel_p0);
+//
+//				fuel_t0 = t0;	// NOTE: This assumes we start with battery ~100%
+//			}
+//
+//			NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
+//			NRF_LOG_DEBUG("time_now: %d", time_now);
+//			NRF_LOG_DEBUG("t0: %d", t0);
+//			NRF_LOG_DEBUG("fuel_t0: %d", fuel_t0);
+//			NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
+//			NRF_LOG_DEBUG("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
+//			NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
+//
+//			if ((time_now - fuel_t0) > runtime_estimate) {	// set to 0 if already past runtime_estimate
+//				fuel_percent = 0;
+//				NRF_LOG_DEBUG("set fuel_percent to 0");
+//			} else {
+////				NRF_LOG_DEBUG("runtime_estimate: %d", runtime_estimate);
+////				NRF_LOG_DEBUG("time_now: %d", time_now);
+////				NRF_LOG_DEBUG("t0: %d", t0);
+////				NRF_LOG_DEBUG("fuel_t0: %d", fuel_t0);
+////				NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)): %d", (runtime_estimate - (time_now - fuel_t0)));
+////				NRF_LOG_DEBUG("100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate: %d", 100*(runtime_estimate - (time_now - fuel_t0)) / runtime_estimate);
+////				NRF_LOG_DEBUG("(runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate): " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT((runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate)));
+//
+//				// Need to be careful.. don't lose precision (use float), and don't overflow int (break into 2 calcs)
+//				float temp = (runtime_estimate - (time_now - fuel_t0)) / (1.0f*runtime_estimate);	// % of runtime estimate.  Calc separately to avoid uint32 overflow
+//				NRF_LOG_DEBUG("temp*1000: %d", temp*1000);
+//				NRF_LOG_DEBUG("temp: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(temp));
+//				fuel_percent = 1000 * 100*temp;	// 100x b/c %, 1000x for 3 decimal places
+//			}
+//		}
 	// No need to modify calculation for standard LiPo battery
 	} else {
 		fuel_percent = fuel_percent_raw;
@@ -5535,7 +5559,7 @@ int main(void) {
 	FRESULT ff_result_stat = f_stat(VALUES_FILE_NAME, NULL);
 	if (ff_result_stat == FR_NO_FILE) {
 		// File doesn't exist, so make a new one
-		NRF_LOG_INFO("Writing new config file..");
+		NRF_LOG_INFO("Writing new _values file..");
 //		ff_result = sd_values_create();
 		ff_result = sd_values_update();
 		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_values_create() ff_result: %d", ff_result);
