@@ -113,7 +113,8 @@
 static void test_all();
 static ret_code_t set_rtc(uint8_t sec, uint8_t min, uint8_t hour, uint8_t wday, uint8_t date, uint8_t mon, uint8_t year);
 void twi_init (void);
-static void start_measurements(uint32_t temp_log_interval);
+//static void start_measurements(uint32_t temp_log_interval);
+static void start_measurements();
 static void stop_measurements();
 
 
@@ -763,6 +764,7 @@ static bool is_logging = false;			// Whether we are currently logging
 //static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
 static int32_t time_to_be_set = 0;
 static bool is_live_streaming = false;	// Used to skip stuff we don't want when live streaming
+static bool live_stream_started = false;
 //#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #define APP_PUSH_RETRY_NUM			5
 
@@ -1839,7 +1841,7 @@ static void send_sdc_packets() {
 				rx_data.len = sizeof(is_offloading);
 				rx_data.offset = 0;
 				rx_data.p_value = (uint8_t*)&is_offloading;
-				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.data_offload_handles.value_handle, &rx_data);
+				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.is_offloading_handles.value_handle, &rx_data);
 				APP_ERROR_CHECK(err_code);
 
 //				start_sending_sdc_data = false;
@@ -1856,7 +1858,12 @@ static void send_sdc_packets() {
 //	    		nrf_gpio_pin_clear(ADP1_PIN);		// Enable HIGH
 
 	    		// Restart measurements when it's done
-	    		start_measurements(log_interval);
+//	        	if (is_live_streaming) {
+//	        		start_measurements(LIVE_STREAM_LOG_INTERVAL);
+//	        	} else {
+//	        		start_measurements(log_interval);
+//	        	}
+	        	start_measurements();
 
 				break;
 			}
@@ -2165,10 +2172,18 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
 
 
 // Starts all of the sensor measurements
-static void start_measurements(uint32_t temp_log_interval) {
+//static void start_measurements(uint32_t temp_log_interval) {
+static void start_measurements() {
 	// Start the loop timer to trigger measurements
 	NRF_LOG_DEBUG("In start_measurements()");
-	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(temp_log_interval), NULL);
+	if (is_live_streaming) {
+		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
+		live_stream_started = true;
+	} else {
+//		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(temp_log_interval), NULL);
+		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
+		live_stream_started = false;
+	}
 	APP_ERROR_CHECK(err_code);
 	is_logging = true;	// flag that we are running
 //	on_logging = true;	// flag that we are running
@@ -2200,7 +2215,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	rx_data.offset = 0;
 	rx_data.p_value = (uint8_t*)&data_buffer;
 
-	static bool using_live_stream_interval = false;
+//	static bool live_stream_started = false;
 
 //	NRF_LOG_DEBUG("p_our_service: %d", p_our_service);
 //	NRF_LOG_DEBUG("&m_SS_service: %d", &m_SS_service);
@@ -2219,7 +2234,8 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 //		if (on_logging > 1) NRF_LOG_WARNING("on_logging > 1: %d", on_logging);
 
 		if (on_logging && !is_logging) {	// wants state change: turn on
-			start_measurements(log_interval);
+//			start_measurements(log_interval);
+			start_measurements();
 			updating_values_file = true;
 		} else if (!on_logging && is_logging) {	// wants state change: turn off
 			stop_measurements();
@@ -2239,7 +2255,8 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 			stop_measurements();
 		}
 		if (on_logging) {
-			start_measurements(log_interval);	// Restarted with the updated log_interval value
+//			start_measurements(log_interval);	// Restarted with the updated log_interval value
+			start_measurements();	// Restarted with the updated log_interval value
 			updating_values_file = true;
 		}
 
@@ -2478,24 +2495,26 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 			);
 
 	// Temporarily change the logging interval faster
-	if (!using_live_stream_interval && is_live_streaming) {
+	if (!live_stream_started && is_live_streaming) {
 //		app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
-//		using_live_stream_interval = true;
+//		live_stream_started = true;
 
-		using_live_stream_interval = true;
 		stop_measurements();
-		start_measurements(LIVE_STREAM_LOG_INTERVAL);
+//		start_measurements(LIVE_STREAM_LOG_INTERVAL);	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in start_measurements()
+		start_measurements();	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in start_measurements()
+//		live_stream_started = true;
 
 	// Restore to original logging interval
-	} else if (using_live_stream_interval && !is_live_streaming) {
+	} else if (live_stream_started && !is_live_streaming) {
 //		app_timer_stop(m_our_char_timer_id);
-//		using_live_stream_interval = false;
+//		live_stream_started = false;
 
-		using_live_stream_interval = false;
 		stop_measurements();
+//		live_stream_started = false;
 		// Only restart it if logging is turned on
 		if (on_logging) {
-			start_measurements(log_interval);
+//			start_measurements(log_interval);
+			start_measurements();
 		}
 
 	}
@@ -2566,6 +2585,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         	NRF_LOG_INFO("Disconnected");
             // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
+//            is_live_streaming = false;
             break;
 
 #ifndef S140
@@ -5604,7 +5624,8 @@ int main(void) {
 //	test_all();
 
 	if (on_logging) {
-		start_measurements(log_interval);
+//		start_measurements(log_interval);
+		start_measurements();
 	}
 
     // Enter main loop.
