@@ -135,7 +135,7 @@ static void stop_measurements();
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -264,7 +264,7 @@ typedef enum {
 	//////			DEEP_SLEEP,
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-	static battery_type battery_type_used = BAT_LIPO_10Ah;	//BAT_LIPO_1200mAh;
+	static battery_type battery_type_used = BAT_LIPO_1200mAh;	//BAT_LIPO_1200mAh;
 	static uint16_t min_battery_level = 0;	// units: percent*1000
 	#define DEVICE_NAME                     "BATT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR		"BATTERY_TEST"
@@ -1662,8 +1662,10 @@ void save_data(void) {
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#else
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -1837,7 +1839,7 @@ static void send_sdc_packets() {
 				rx_data.len = sizeof(is_offloading);
 				rx_data.offset = 0;
 				rx_data.p_value = (uint8_t*)&is_offloading;
-				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.data_offload_handles.cccd_handle, &rx_data);
+				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.data_offload_handles.value_handle, &rx_data);
 				APP_ERROR_CHECK(err_code);
 
 //				start_sending_sdc_data = false;
@@ -4447,7 +4449,7 @@ void get_data() {
 
 	/** Initialize some stuff **/
     // ADP High Power wake, turn ON power to high power sensors
-	if (using_component(ADP_HIGH, components_used)) {
+//	if (using_component(ADP_HIGH, components_used)) {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("WAKE, ADP_HIGH: Turning ON ADP Power...");
 		NRF_LOG_INFO("-------------------------------");
@@ -4455,7 +4457,7 @@ void get_data() {
 		nrf_gpio_cfg_output(ADP2_PIN);
 		NRF_LOG_INFO("ADP_HIGH: HIGH.");
 		nrf_gpio_pin_set(ADP2_PIN);	// Enable HIGH, Turn OFF ADP
-	}
+//	}
 	// Turn on Sample LED
     nrf_gpio_cfg_output(SAMPLE_LED);
 	nrf_gpio_pin_set(SAMPLE_LED);	// Enable HIGH, Turn ON LED
@@ -4637,7 +4639,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 33, 21 +4, 	4, 6, 6, 18);	// about 11 seconds of delay
+			set_rtc(00, 52, 23 +4, 	6, 15, 6, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
