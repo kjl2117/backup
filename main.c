@@ -2585,7 +2585,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         	NRF_LOG_INFO("Disconnected");
             // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
-//            is_live_streaming = false;
+            is_live_streaming = false;
             break;
 
 #ifndef S140
