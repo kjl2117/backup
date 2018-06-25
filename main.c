@@ -113,8 +113,8 @@
 static void test_all();
 static ret_code_t set_rtc(uint8_t sec, uint8_t min, uint8_t hour, uint8_t wday, uint8_t date, uint8_t mon, uint8_t year);
 void twi_init (void);
-//static void start_measurements(uint32_t temp_log_interval);
-static void start_measurements();
+//static void restart_measurements(uint32_t temp_log_interval);
+static void restart_measurements();
 static void stop_measurements();
 
 
@@ -136,7 +136,7 @@ static void stop_measurements();
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -452,6 +452,7 @@ static int32_t t0 = 0;
 static int16_t rtc_temp = 0;	// units: degC*100, precision +/- 0.25C
 static int time_was_set = 0;
 static bool setting_new_time = false;
+static bool adjusting_timer_start = false;
 
 /** NRF Internal temp **/
 static int32_t temp_nrf = 0;	// units: degC*100, precision +/- 0.25C
@@ -618,18 +619,20 @@ nrf_drv_wdt_channel_id wdt_sleep_channel_id;
 static int wdt_triggered = 0;
 
 /** APP TIMERS **/
-static bool meas_loop_wait_done = false;
-APP_TIMER_DEF(meas_loop_timer);
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
+static int hpm_startup_wait_done = 0;
+APP_TIMER_DEF(hpm_startup_timer);
+static volatile bool meas_loop_wait_done = false;
 static volatile bool plantower_startup_wait_done = false;
 static volatile bool specCO_startup_wait_done = false;
 static volatile bool figCO2_startup_wait_done = false;
+static volatile bool start_adjustment_wait_done = false;
+APP_TIMER_DEF(meas_loop_timer);
 APP_TIMER_DEF(plantower_startup_timer);
 APP_TIMER_DEF(specCO_startup_timer);
 APP_TIMER_DEF(figCO2_startup_timer);
-static int hpm_startup_wait_done = 0;
-APP_TIMER_DEF(hpm_startup_timer);
+APP_TIMER_DEF(start_adjustment_timer);
 
 //APP_TIMER_DEF(m_our_char_timer_id);
 
@@ -764,9 +767,10 @@ static bool is_logging = false;			// Whether we are currently logging
 //static uint32_t min_battery_level = 0;//10*1000;	// units: percent*1000
 static int32_t time_to_be_set = 0;
 static bool is_live_streaming = false;	// Used to skip stuff we don't want when live streaming
-static bool live_stream_started = false;
+static bool using_live_stream_interval = false;
 //#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 #define APP_PUSH_RETRY_NUM			5
+#define APP_PUSH_RETRY_WAIT			100
 
 #define DATA_OFFLOAD_PACKET_SIZE	20
 
@@ -1837,12 +1841,32 @@ static void send_sdc_packets() {
 
 				// Need to set the value with special function so App gets notified
 //				uint32_t data_buffer = 0;
-				ble_gatts_value_t rx_data;
-				rx_data.len = sizeof(is_offloading);
-				rx_data.offset = 0;
-				rx_data.p_value = (uint8_t*)&is_offloading;
-				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.is_offloading_handles.value_handle, &rx_data);
-				APP_ERROR_CHECK(err_code);
+//				ble_gatts_value_t rx_data;
+//				rx_data.len = sizeof(is_offloading);
+//				rx_data.offset = 0;
+//				rx_data.p_value = (uint8_t*)&is_offloading;
+//				err_code = sd_ble_gatts_value_set(m_SS_service.conn_handle, m_SS_service.is_offloading_handles.value_handle, &rx_data);
+//				APP_ERROR_CHECK(err_code);
+
+//				for (int i=0; i < APP_PUSH_RETRY_NUM; i++) {	// Keep trying
+//					err_code = custom_characteristic_update(&m_SS_service, &m_SS_service.is_offloading_handles, &is_offloading, sizeof(is_offloading));
+//					if (err_code == NRF_SUCCESS) break;
+//					nrf_delay_ms(APP_PUSH_RETRY_WAIT);
+//				}
+//				if (err_code) {
+//					NRF_LOG_ERROR("After offloading: err_code: %d", err_code);
+//					APP_ERROR_CHECK(err_code);
+//					err_cnt++;
+//				}
+//
+//				err_code = custom_characteristic_update(&m_SS_service, &m_SS_service.is_offloading_handles, &is_offloading, sizeof(is_offloading));
+//				if (err_code != NRF_SUCCESS) {
+//					NRF_LOG_ERROR("After offloading: err_code: %d", err_code);
+//					APP_ERROR_CHECK(err_code);
+//					err_cnt++;
+//				}
+
+
 
 //				start_sending_sdc_data = false;
 				NRF_LOG_INFO("Final cnt: %d", cnt);
@@ -1859,11 +1883,11 @@ static void send_sdc_packets() {
 
 	    		// Restart measurements when it's done
 //	        	if (is_live_streaming) {
-//	        		start_measurements(LIVE_STREAM_LOG_INTERVAL);
+//	        		restart_measurements(LIVE_STREAM_LOG_INTERVAL);
 //	        	} else {
-//	        		start_measurements(log_interval);
+//	        		restart_measurements(log_interval);
 //	        	}
-	        	start_measurements();
+	        	restart_measurements();
 
 				break;
 			}
@@ -2170,27 +2194,6 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
 }
 
 
-
-// Starts all of the sensor measurements
-//static void start_measurements(uint32_t temp_log_interval) {
-static void start_measurements() {
-	// Start the loop timer to trigger measurements
-	NRF_LOG_DEBUG("In start_measurements()");
-	if (is_live_streaming) {
-		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
-		live_stream_started = true;
-	} else {
-//		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(temp_log_interval), NULL);
-		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
-		live_stream_started = false;
-	}
-	APP_ERROR_CHECK(err_code);
-	is_logging = true;	// flag that we are running
-//	on_logging = true;	// flag that we are running
-//	test_all();	// Do a first measurement (otherwise we have to wait a full log_interval)
-	meas_loop_wait_done = true;
-}
-
 // Stop all of the sensor measurements
 static void stop_measurements() {
 	// Start the loop timer to trigger measurements
@@ -2199,7 +2202,50 @@ static void stop_measurements() {
 	APP_ERROR_CHECK(err_code);
 	is_logging = false;	// flag that we have stopped running
 //	on_logging = false;	// flag that we have stopped running
+//	using_live_stream_interval = false;
 }
+
+
+// Starts all of the sensor measurements
+//static void restart_measurements(uint32_t temp_log_interval) {
+static void restart_measurements() {
+	// Stop the current timer
+	stop_measurements();
+
+	if (on_logging) {	// only start again if turned on
+		// Start the loop timer to trigger measurements
+		NRF_LOG_DEBUG("In restart_measurements()");
+		if (is_live_streaming) {
+			err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
+			using_live_stream_interval = true;
+		} else {
+	//		// Wait before starting timer so that it will start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
+	//		err_code = read_rtc();
+	//		if (err_code) {
+	//			NRF_LOG_INFO("* RETRY: RTC ERROR, err_code=%d *", err_code);
+	//			if (err_code) {
+	//				NRF_LOG_ERROR("** ERROR: RTC read, err_code=%d **", err_code);
+	//				time_now = 0;
+	//				err_cnt++;
+	//				rtc_error_cnt_total++;
+	//			}
+	//		}
+
+
+
+	//		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(temp_log_interval), NULL);
+			err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
+			using_live_stream_interval = false;
+		}
+		APP_ERROR_CHECK(err_code);
+		is_logging = true;	// flag that we are running
+	//	on_logging = true;	// flag that we are running
+	//	test_all();	// Do a first measurement (otherwise we have to wait a full log_interval)
+		adjusting_timer_start = true;
+		meas_loop_wait_done = true;
+	}
+}
+
 
 
 
@@ -2215,7 +2261,7 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	rx_data.offset = 0;
 	rx_data.p_value = (uint8_t*)&data_buffer;
 
-//	static bool live_stream_started = false;
+//	static bool using_live_stream_interval = false;
 
 //	NRF_LOG_DEBUG("p_our_service: %d", p_our_service);
 //	NRF_LOG_DEBUG("&m_SS_service: %d", &m_SS_service);
@@ -2233,14 +2279,17 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		NRF_LOG_DEBUG("is_logging: %d", is_logging);
 //		if (on_logging > 1) NRF_LOG_WARNING("on_logging > 1: %d", on_logging);
 
-		if (on_logging && !is_logging) {	// wants state change: turn on
-//			start_measurements(log_interval);
-			start_measurements();
-			updating_values_file = true;
-		} else if (!on_logging && is_logging) {	// wants state change: turn off
-			stop_measurements();
-			updating_values_file = true;
-		}
+//		if (on_logging && !is_logging) {	// wants state change: turn on
+////			restart_measurements(log_interval);
+//			restart_measurements();
+//			updating_values_file = true;
+//		} else if (!on_logging && is_logging) {	// wants state change: turn off
+//			stop_measurements();
+//			updating_values_file = true;
+//		}
+
+		restart_measurements();
+		updating_values_file = true;
 
 		NRF_LOG_DEBUG("AS on_logging: %d", on_logging);
 		NRF_LOG_DEBUG("AS is_logging: %d", is_logging);
@@ -2250,21 +2299,37 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		NRF_LOG_INFO("log_interval: %d", log_interval);
 
-		// Need to stop and restart the timer
-		if (is_logging) {
-			stop_measurements();
-		}
-		if (on_logging) {
-//			start_measurements(log_interval);	// Restarted with the updated log_interval value
-			start_measurements();	// Restarted with the updated log_interval value
-			updating_values_file = true;
-		}
+//		// Need to stop and restart the timer
+//		if (is_logging) {
+//			stop_measurements();
+//		}
+//		if (on_logging) {
+////			restart_measurements(log_interval);	// Restarted with the updated log_interval value
+//			restart_measurements();	// Restarted with the updated log_interval value
+//			updating_values_file = true;
+//		}
+
+		restart_measurements();	// Restarted with the updated log_interval value
+		updating_values_file = true;
+
 
 	// Setting the RTC to a user defined time
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->rtc_handles.value_handle) {
 
 		NRF_LOG_INFO("time_to_be_set: %d", time_to_be_set);
 		setting_new_time = true;	// set flag, handle it later whe reading RTC
+
+
+//		// FOR TESTING if this will work if called NOT from main context
+//		NRF_LOG_INFO("setting_new_time: %d", time_to_be_set);
+//
+//	    struct tm * p_tm;
+//	    p_tm = gmtime(&time_to_be_set);
+//	    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
+//		NRF_LOG_INFO("DONE setting_new_time: %d", time_to_be_set);
+//
+//	    setting_new_time = false;	// reset flag
+
 
 	// Data offload
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->data_offload_handles.cccd_handle) {
@@ -2478,45 +2543,52 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 	}
 
 
-	// Check if anything is enabled
-//	bool something_is_enabled = (
-	is_live_streaming = (
-			p_our_service->pm2_5_handles.is_enabled ||
-			p_our_service->pm10_handles.is_enabled ||
-			p_our_service->co_handles.is_enabled ||
-			p_our_service->co2_handles.is_enabled ||
-			p_our_service->rh_handles.is_enabled ||
-			p_our_service->temp_bme_handles.is_enabled ||
-			p_our_service->temp_rtc_handles.is_enabled ||
-			p_our_service->temp_nrf_handles.is_enabled ||
-			p_our_service->ambient_CH0_handles.is_enabled ||
-			p_our_service->ambient_CH1_handles.is_enabled ||
-			p_our_service->uva_handles.is_enabled //||
-			);
+	// Check if anything is enabled, don't do for the m_SS_service
+	if (p_our_service == &product_service) {
+	//	bool something_is_enabled = (
+		is_live_streaming = (
+				p_our_service->pm2_5_handles.is_enabled ||
+				p_our_service->pm10_handles.is_enabled ||
+				p_our_service->co_handles.is_enabled ||
+				p_our_service->co2_handles.is_enabled ||
+				p_our_service->rh_handles.is_enabled ||
+				p_our_service->temp_bme_handles.is_enabled ||
+				p_our_service->temp_rtc_handles.is_enabled ||
+				p_our_service->temp_nrf_handles.is_enabled ||
+				p_our_service->ambient_CH0_handles.is_enabled ||
+				p_our_service->ambient_CH1_handles.is_enabled ||
+				p_our_service->uva_handles.is_enabled //||
+				);
 
-	// Temporarily change the logging interval faster
-	if (!live_stream_started && is_live_streaming) {
-//		app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
-//		live_stream_started = true;
+		NRF_LOG_DEBUG("using_live_stream_interval: %d", using_live_stream_interval);
+		NRF_LOG_DEBUG("is_live_streaming: %d", is_live_streaming);
 
-		stop_measurements();
-//		start_measurements(LIVE_STREAM_LOG_INTERVAL);	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in start_measurements()
-		start_measurements();	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in start_measurements()
-//		live_stream_started = true;
+		// Temporarily change the logging interval faster
+		if (!using_live_stream_interval && is_live_streaming) {
+	//		app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
+	//		using_live_stream_interval = true;
 
-	// Restore to original logging interval
-	} else if (live_stream_started && !is_live_streaming) {
-//		app_timer_stop(m_our_char_timer_id);
-//		live_stream_started = false;
+//			stop_measurements();
+	//		restart_measurements(LIVE_STREAM_LOG_INTERVAL);	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in restart_measurements()
+			restart_measurements();	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in restart_measurements()
+	//		using_live_stream_interval = true;
 
-		stop_measurements();
-//		live_stream_started = false;
-		// Only restart it if logging is turned on
-		if (on_logging) {
-//			start_measurements(log_interval);
-			start_measurements();
+		// Restore to original logging interval
+		} else if (using_live_stream_interval && !is_live_streaming) {
+	//		app_timer_stop(m_our_char_timer_id);
+	//		using_live_stream_interval = false;
+
+////			stop_measurements();
+//	//		using_live_stream_interval = false;
+//			// Only restart it if logging is turned on
+//			if (on_logging) {
+//	//			restart_measurements(log_interval);
+//				restart_measurements();
+//			}
+
+			restart_measurements();
+
 		}
-
 	}
 
 
@@ -4512,6 +4584,71 @@ void get_data() {
 //	// ADC setup
 //    saadc_init();
 
+
+
+	// RTC, TWI (I2C)
+	if (using_component(RTC, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Testing RTC with I2C/TWI...");
+		NRF_LOG_INFO("---------------------------");
+
+		// Set time manually
+		if (SETTING_TIME_MANUALLY && !time_was_set) {
+			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
+//			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
+//			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
+			set_rtc(00, 52, 23 +4, 	6, 15, 6, 18);	// about 11 seconds of delay
+			time_was_set = 1;
+			// NOTE: turn OFF SETTING_TIME_MANUALLY after
+		}
+
+		// Set time with new BLE time that was sent
+		if (setting_new_time) {
+			NRF_LOG_INFO("setting_new_time: %d", time_to_be_set);
+
+		    struct tm * p_tm;
+		    p_tm = gmtime(&time_to_be_set);
+		    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
+
+		    setting_new_time = false;	// reset flag
+		}
+
+		// Try reading a few times in case there is error
+		err_code = 1;
+		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
+			err_code = read_rtc();
+			if (err_code) {
+				NRF_LOG_INFO("* RETRY: RTC ERROR, err_code=%d *", err_code);
+				avoided_error_cnt++;
+				nrf_delay_ms(TWI_RETRY_WAIT);
+			}
+		}
+		if (err_code) {
+			NRF_LOG_ERROR("** ERROR: RTC read, err_code=%d **", err_code);
+			time_now = 0;
+			err_cnt++;
+			rtc_error_cnt_total++;
+		}
+
+		if (t0 == 0) {	// Record initial time
+			t0 = time_now;
+		}
+
+		// Try to make all of the measurement timers sync'ed to start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
+		if (adjusting_timer_start) {
+			uint32_t time_to_wait_s = log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;
+			if (time_to_wait_s < 0) time_to_wait_s = 0;	// In case we end up with negative number
+		    start_adjustment_wait_done = false;
+			err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(time_to_wait_s*1000), NULL);
+			APP_ERROR_CHECK(err_code);
+		}
+
+		// Print the reading
+		NRF_LOG_INFO("time_now: %d", time_now);
+		NRF_LOG_INFO("rtc_temp: %d", rtc_temp);
+	}
+
+
 	// DHT sensor
 	if (using_component(DHT, components_used)) {
 		NRF_LOG_INFO("");
@@ -4645,60 +4782,6 @@ void get_data() {
 		NRF_LOG_INFO("bme_temp_C: %d", bme_temp_C);
 		NRF_LOG_INFO("bme_humidity: %d", bme_humidity);
 		NRF_LOG_INFO("bme_pressure: %d", bme_pressure);
-	}
-
-
-	// RTC, TWI (I2C)
-	if (using_component(RTC, components_used)) {
-		NRF_LOG_INFO("");
-		NRF_LOG_INFO("Testing RTC with I2C/TWI...");
-		NRF_LOG_INFO("---------------------------");
-
-		// Set time manually
-		if (SETTING_TIME_MANUALLY && !time_was_set) {
-			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
-//			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
-//			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 52, 23 +4, 	6, 15, 6, 18);	// about 11 seconds of delay
-			time_was_set = 1;
-			// NOTE: turn OFF SETTING_TIME_MANUALLY after
-		}
-
-		// Set time with new BLE time that was sent
-		if (setting_new_time) {
-			NRF_LOG_INFO("setting_new_time: %d", time_to_be_set);
-
-		    struct tm * p_tm;
-		    p_tm = gmtime(&time_to_be_set);
-		    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
-
-		    setting_new_time = false;	// reset flag
-		}
-
-		err_code = 1;
-		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
-			err_code = read_rtc();
-			if (err_code) {
-				NRF_LOG_INFO("* RETRY: RTC ERROR, err_code=%d *", err_code);
-				avoided_error_cnt++;
-				nrf_delay_ms(TWI_RETRY_WAIT);
-			}
-		}
-
-		if (err_code) {
-			NRF_LOG_ERROR("** ERROR: RTC read, err_code=%d **", err_code);
-			time_now = 0;
-			err_cnt++;
-			rtc_error_cnt_total++;
-		}
-
-		if (t0 == 0) {
-			t0 = time_now;
-		}
-
-		// Print the reading
-		NRF_LOG_INFO("time_now: %d", time_now);
-		NRF_LOG_INFO("rtc_temp: %d", rtc_temp);
 	}
 
 
@@ -5194,7 +5277,7 @@ int test_main() {
 		// Read all of the sensors
 		get_data();
 		// Save the data to SD card
-		if (using_component(SDC, components_used)) {
+		if (!is_live_streaming && using_component(SDC, components_used)) {
 			save_data();
 		}
 
@@ -5356,7 +5439,7 @@ static void test_all()
 		for (int i=0; i < APP_PUSH_RETRY_NUM; i++) {	// Keep trying
 			err_code = timer_timeout_handler(NULL);
 			if (err_code == NRF_SUCCESS) break;
-		};
+		}
 		if (err_code) {
 			NRF_LOG_ERROR("** ERROR: Figaro CO2 read, err_code=%d **", err_code);
 		}
@@ -5408,21 +5491,25 @@ static void meas_loop_handler(void * p_context) {
 	NRF_LOG_DEBUG("meas_loop_wait_done: %d", meas_loop_wait_done);
 //	test_all();
 }
-static void dht_startup_handler(void * p_context) {
-	dht_startup_wait_done = 1;
-	NRF_LOG_DEBUG("dht_startup_wait_done: %d", dht_startup_wait_done);
-}
 static void plantower_startup_handler(void * p_context) {
-	plantower_startup_wait_done = 1;
+	plantower_startup_wait_done = true;
 	NRF_LOG_DEBUG("plantower_startup_wait_done: %d", plantower_startup_wait_done);
 }
 static void specCO_startup_handler(void * p_context) {
-	specCO_startup_wait_done = 1;
+	specCO_startup_wait_done = true;
 	NRF_LOG_DEBUG("specCO_startup_wait_done: %d", specCO_startup_wait_done);
 }
 static void figCO2_startup_handler(void * p_context) {
-	figCO2_startup_wait_done = 1;
+	figCO2_startup_wait_done = true;
 	NRF_LOG_DEBUG("figCO2_startup_wait_done: %d", figCO2_startup_wait_done);
+}
+static void start_adjustment_handler(void * p_context) {
+	start_adjustment_wait_done = true;
+	NRF_LOG_DEBUG("start_adjustment_wait_done: %d", start_adjustment_wait_done);
+}
+static void dht_startup_handler(void * p_context) {
+	dht_startup_wait_done = 1;
+	NRF_LOG_DEBUG("dht_startup_wait_done: %d", dht_startup_wait_done);
 }
 static void hpm_startup_handler(void * p_context) {
 	hpm_startup_wait_done = 1;
@@ -5452,10 +5539,6 @@ static void timers_init(void)
     APP_ERROR_CHECK(err_code);
 
 	// Create timers for startup wait (depends on each sensor)
-    err_code = app_timer_create(&dht_startup_timer,
-    							APP_TIMER_MODE_SINGLE_SHOT,
-                                dht_startup_handler);	// sets a flag when timer expires
-    APP_ERROR_CHECK(err_code);
     err_code = app_timer_create(&plantower_startup_timer,
     							APP_TIMER_MODE_SINGLE_SHOT,
                                 plantower_startup_handler);	// sets a flag when timer expires
@@ -5467,6 +5550,14 @@ static void timers_init(void)
     err_code = app_timer_create(&figCO2_startup_timer,
     							APP_TIMER_MODE_SINGLE_SHOT,
 								figCO2_startup_handler);	// sets a flag when timer expires
+    APP_ERROR_CHECK(err_code);
+    err_code = app_timer_create(&start_adjustment_timer,
+    							APP_TIMER_MODE_SINGLE_SHOT,
+								start_adjustment_handler);	// sets a flag when timer expires
+    APP_ERROR_CHECK(err_code);
+    err_code = app_timer_create(&dht_startup_timer,
+    							APP_TIMER_MODE_SINGLE_SHOT,
+                                dht_startup_handler);	// sets a flag when timer expires
     APP_ERROR_CHECK(err_code);
     err_code = app_timer_create(&hpm_startup_timer,
     							APP_TIMER_MODE_SINGLE_SHOT,
@@ -5623,10 +5714,11 @@ int main(void) {
 //	APP_ERROR_CHECK(err_code);
 //	test_all();
 
-	if (on_logging) {
-//		start_measurements(log_interval);
-		start_measurements();
-	}
+//	if (on_logging) {
+////		restart_measurements(log_interval);
+//		restart_measurements();
+//	}
+	restart_measurements();
 
     // Enter main loop.
     for (;;)
@@ -5635,6 +5727,14 @@ int main(void) {
         power_manage();
         if (meas_loop_wait_done) {
         	test_all();
+        }
+        // Restart the measurement timer so that the start times are sync'ed
+        if (start_adjustment_wait_done) {
+//        	stop_measurements();
+        	restart_measurements();
+        	start_adjustment_wait_done = false;
+        	adjusting_timer_start = false;
+			NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
         }
         if (updating_end_byte) {
 			// Start the SD card
