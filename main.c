@@ -135,8 +135,8 @@ static void stop_measurements();
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
-static bool on_logging = false;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static bool on_logging = true;	// Start with logging on or off (Also App can control this)
+static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -1607,7 +1607,8 @@ FRESULT sd_info_create() {
     char out_str[MAX_OUT_STR_SIZE];
 	int out_str_size = sprintf(out_str,
 			"Product: %s\r\n"
-			"ble_gap_address = %X:%X:%X:%X:%X:%X\r\n"
+//			"ble_gap_address = %X:%X:%X:%X:%X:%X\r\n"
+			"ble_gap_address = %02X:%02X:%02X:%02X:%02X:%02X\r\n"
 			"sensen_FW_version: %s\r\n",
 			PRODUCT_STR,
 			ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0],
@@ -2213,13 +2214,14 @@ static void stop_measurements() {
 static void restart_measurements() {
 	// Stop the current timer
 	stop_measurements();
+	NRF_LOG_DEBUG("In restart_measurements()");
 
 	if (on_logging) {	// only start again if turned on
 		// Start the loop timer to trigger measurements
-		NRF_LOG_DEBUG("In restart_measurements()");
 		if (is_live_streaming) {
 			err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
 			using_live_stream_interval = true;
+			adjusting_timer_start = false;
 		} else {
 	//		// Wait before starting timer so that it will start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
 	//		err_code = read_rtc();
@@ -2238,12 +2240,13 @@ static void restart_measurements() {
 	//		err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(temp_log_interval), NULL);
 			err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
 			using_live_stream_interval = false;
+			adjusting_timer_start = true;
 		}
 		APP_ERROR_CHECK(err_code);
 		is_logging = true;	// flag that we are running
 	//	on_logging = true;	// flag that we are running
 	//	test_all();	// Do a first measurement (otherwise we have to wait a full log_interval)
-		adjusting_timer_start = true;
+//		adjusting_timer_start = true;
 		meas_loop_wait_done = true;
 	}
 }
@@ -4564,30 +4567,6 @@ void get_data() {
 	}
 //	//    // TWI (I2C) init
 //	    twi_init();
-    // Init Fuel Gauge
-	if (using_component(FUEL_GAUGE, components_used)) {
-		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
-	}
-	// Init Ambient Light Sensor
-	if (using_component(AMBIENT_LTR, components_used)) {
-		// Init sensor
-		nrf_delay_ms(100);	// Required startup wait
-		ambient_light_set_meas_rate(LTR329_integration_time, LTR329_meas_rate);
-		ambient_light_set_control(LTR329_gain, false, true);
-//		nrf_delay_ms(10);	// Wakeup time (Datasheet, but doesn't work if too small)
-		nrf_delay_ms(100);	// Wakeup time
-	}
-	// Init UVA Sensor
-	if (using_component(UVA_VEML, components_used)) {
-		// Init sensor
-//		nrf_delay_ms(1000);	// wait for some measurements
-		UVA_set_control(UVA_integration_time, false);
-//		nrf_delay_ms(1000);	// wait for some measurements
-	}
-
-//	// ADC setup
-//    saadc_init();
-
 
 
 	// RTC, TWI (I2C)
@@ -4611,8 +4590,8 @@ void get_data() {
 			NRF_LOG_INFO("setting_new_time: %d", time_to_be_set);
 
 		    struct tm * p_tm;
-		    p_tm = gmtime(&time_to_be_set);
-		    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
+		    p_tm = gmtime(&time_to_be_set);	// need to adjust for INITIAL_SETTLING_WAIT as well
+		    set_rtc((uint8_t) p_tm->tm_sec + INITIAL_SETTLING_WAIT/1000, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
 
 		    setting_new_time = false;	// reset flag
 		}
@@ -4641,7 +4620,11 @@ void get_data() {
 		// Try to make all of the measurement timers sync'ed to start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
 		if (adjusting_timer_start) {
 			uint32_t time_to_wait_s = log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;
-			if (time_to_wait_s < 0) time_to_wait_s = 0;	// In case we end up with negative number
+			uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+			if (time_to_wait_s < 2*max_sensor_wait_ms/1000) {	// Make sure we wait more than the sensor wait time; don't want to adjust time while still measuring
+				time_to_wait_s = 2*log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;	// In case we end up with negative number
+			}
+			NRF_LOG_INFO("time_to_wait_s: %d", time_to_wait_s);
 		    start_adjustment_wait_done = false;
 			err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(time_to_wait_s*1000), NULL);
 			APP_ERROR_CHECK(err_code);
@@ -4651,6 +4634,34 @@ void get_data() {
 		NRF_LOG_INFO("time_now: %d", time_now);
 		NRF_LOG_INFO("rtc_temp: %d", rtc_temp);
 	}
+
+
+    // Init Fuel Gauge
+	if (using_component(FUEL_GAUGE, components_used)) {
+		fuel_gauge_wake();	// Turn on after things have settled, but give it time to estimate
+	}
+	// Init Ambient Light Sensor
+	if (using_component(AMBIENT_LTR, components_used)) {
+		// Init sensor
+		nrf_delay_ms(100);	// Required startup wait
+		ambient_light_set_meas_rate(LTR329_integration_time, LTR329_meas_rate);
+		ambient_light_set_control(LTR329_gain, false, true);
+//		nrf_delay_ms(10);	// Wakeup time (Datasheet, but doesn't work if too small)
+		nrf_delay_ms(100);	// Wakeup time
+	}
+	// Init UVA Sensor
+	if (using_component(UVA_VEML, components_used)) {
+		// Init sensor
+//		nrf_delay_ms(1000);	// wait for some measurements
+		UVA_set_control(UVA_integration_time, false);
+//		nrf_delay_ms(1000);	// wait for some measurements
+	}
+
+//	// ADC setup
+//    saadc_init();
+
+
+
 
 
 	// DHT sensor
@@ -5459,7 +5470,8 @@ static void test_all()
 	NRF_LOG_INFO("min_battery_level = %d", min_battery_level);
 	NRF_LOG_INFO("is_live_streaming = %d", is_live_streaming);
 
-	NRF_LOG_DEBUG("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+//	NRF_LOG_DEBUG("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+	NRF_LOG_INFO("ble_gap_address = %02X:%02X:%02X:%02X:%02X:%02X", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
 //	NRF_LOG_DEBUG("ble_gap_address = %x", ble_gap_address.addr);
 //	NRF_LOG_DEBUG("ble_gap_address.addr[0] = %x", ble_gap_address.addr[0]);
 //	NRF_LOG_DEBUG("ble_gap_address.addr[1] = %x", ble_gap_address.addr[1]);
@@ -5652,7 +5664,7 @@ int main(void) {
     // Save some values
     sd_ble_gap_addr_get(&ble_gap_address);
 	// Other info user cares about
-	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
+	NRF_LOG_INFO("ble_gap_address = %02X:%02X:%02X:%02X:%02X:%02X", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
 	NRF_LOG_INFO("on_logging = %d", on_logging);
 	NRF_LOG_INFO("log_interval = %d", log_interval);
 	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
