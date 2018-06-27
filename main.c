@@ -136,7 +136,7 @@ static void stop_measurements();
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
 static bool on_logging = true;	// Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 30*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -622,6 +622,7 @@ static int wdt_triggered = 0;
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
 static int hpm_startup_wait_done = 0;
+static volatile bool ignoring_next_meas_loop = false;
 APP_TIMER_DEF(hpm_startup_timer);
 static volatile bool meas_loop_wait_done = false;
 static volatile bool plantower_startup_wait_done = false;
@@ -4619,10 +4620,12 @@ void get_data() {
 
 		// Try to make all of the measurement timers sync'ed to start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
 		if (adjusting_timer_start) {
-			uint32_t time_to_wait_s = log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;
+			int32_t time_to_wait_s = log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;
 			uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 			if (time_to_wait_s < 2*max_sensor_wait_ms/1000) {	// Make sure we wait more than the sensor wait time; don't want to adjust time while still measuring
-				time_to_wait_s = 2*log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;	// In case we end up with negative number
+				time_to_wait_s += log_interval/1000;
+				ignoring_next_meas_loop = true;
+				NRF_LOG_INFO("ignoring_next_meas_loop: %d", ignoring_next_meas_loop);
 			}
 			NRF_LOG_INFO("time_to_wait_s: %d", time_to_wait_s);
 		    start_adjustment_wait_done = false;
@@ -5503,7 +5506,12 @@ static void test_all()
 
 // Timeout handlers for startup waits with the single shot timers
 static void meas_loop_handler(void * p_context) {
-	meas_loop_wait_done = true;
+	if (ignoring_next_meas_loop) {
+		meas_loop_wait_done = false;
+		ignoring_next_meas_loop = false;
+	} else {
+		meas_loop_wait_done = true;
+	}
 	NRF_LOG_DEBUG("meas_loop_wait_done: %d", meas_loop_wait_done);
 //	test_all();
 }
