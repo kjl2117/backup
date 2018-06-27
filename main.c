@@ -135,7 +135,7 @@ static void stop_measurements();
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
-static bool on_logging = true;	// Start with logging on or off (Also App can control this)
+static bool on_logging = false;	// Start with logging on or off (Also App can control this)
 static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -384,7 +384,7 @@ static int sdc_read_num = 0;
 //static uint32_t sdc_bytes_read = 0;
 static uint32_t start_byte = 0;
 static uint32_t end_byte = 0;
-static bool updating_end_byte = false;
+//static bool updating_end_byte = false;
 static bool in_measuring_loop = false;
 static bool is_offloading = false;
 //static uint8_t * broadcast_data;
@@ -1681,7 +1681,9 @@ void save_data(void) {
     	err_cnt++;
     }
 
+    // Write the new data to file, update end_byte, close file
     sd_write_str(out_str);
+	end_byte = f_size(&file);
     sd_close();
 
 
@@ -2347,7 +2349,9 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 //			}
 
 
-			updating_end_byte = true;
+//			updating_end_byte = true;
+
+
 //			// Update the End Byte (file size) that will be sent
 //		    sd_power_on();
 //			sd_init();
@@ -4597,7 +4601,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 52, 23 +4, 	6, 15, 6, 18);	// about 11 seconds of delay
+			set_rtc(00, 31, 14 +4, 	3, 26, 6, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -5648,10 +5652,10 @@ int main(void) {
     // Save some values
     sd_ble_gap_addr_get(&ble_gap_address);
 	// Other info user cares about
+	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
 	NRF_LOG_INFO("on_logging = %d", on_logging);
 	NRF_LOG_INFO("log_interval = %d", log_interval);
 	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
-	NRF_LOG_INFO("ble_gap_address = %x:%x:%x:%x:%x:%x", ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0]);
 	NRF_LOG_DEBUG("PLANTOWER_STARTUP_WAIT_TIME = %d", PLANTOWER_STARTUP_WAIT_TIME);
 	NRF_LOG_DEBUG("SPEC_CO_STARTUP_WAIT_TIME = %d", SPEC_CO_STARTUP_WAIT_TIME);
 	NRF_LOG_DEBUG("FUEL_PERCENT_THRESHOLD = %d", FUEL_PERCENT_THRESHOLD);
@@ -5736,31 +5740,31 @@ int main(void) {
         	adjusting_timer_start = false;
 			NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
         }
-        if (updating_end_byte) {
-			// Start the SD card
-		    sd_power_on();
-			sd_init();
-			sd_mount();
-			// Update the End Byte (file size) that will be sent
-			sd_open(ble_file_name, FA_READ);
-//			// Start where we left off last time
-//			f_lseek(&file, start_byte);
-			// Get the SD card size
-			end_byte = f_size(&file);
-			NRF_LOG_DEBUG("end_byte: %d", end_byte);
-
-//			// Update the Config file
-//			updating_values_file = true;
-////			f_close(&file);
-////			sd_values_update();
-
-        	// Uninitialize here, since don't want to interfere with another SDC operation
-		    sd_close();
-        	sd_uninit();
-        	sd_power_off();
-
-        	updating_end_byte = false;
-        }
+//        if (updating_end_byte) {
+//			// Start the SD card
+//		    sd_power_on();
+//			sd_init();
+//			sd_mount();
+//			// Update the End Byte (file size) that will be sent
+//			sd_open(ble_file_name, FA_READ);
+////			// Start where we left off last time
+////			f_lseek(&file, start_byte);
+//			// Get the SD card size
+//			end_byte = f_size(&file);
+//			NRF_LOG_DEBUG("end_byte: %d", end_byte);
+//
+////			// Update the Config file
+////			updating_values_file = true;
+//////			f_close(&file);
+//////			sd_values_update();
+//
+//        	// Uninitialize here, since don't want to interfere with another SDC operation
+//		    sd_close();
+//        	sd_uninit();
+//        	sd_power_off();
+//
+//        	updating_end_byte = false;
+//        }
         if (updating_values_file) {
 
 			// Start the SD card
