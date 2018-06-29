@@ -131,11 +131,11 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
-#define READING_VALUES_FILE			0	// If we want to read in saved values from the config file
-static bool on_logging = true;	// Start with logging on or off (Also App can control this)
+#define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
+static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
 static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -368,6 +368,7 @@ static ret_code_t err_code;
 	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 #endif
+static bool testing_sensors = false;	// Run through all sensors once in the beginning to check (but don't save to SDC)
 
 /** SD Card Data Offload Variables **/
 #define SDC_BUFF_SIZE		10*1000	//100
@@ -527,7 +528,7 @@ static uint32_t fuel_percent = 0;	// units: percent*1000
 static uint32_t fuel_percent_raw = 0;	// units: percent*1000
 //#define FUEL_SCALE_FACTOR		2.589	// Factor of how much time expansion
 //#define FLOAT_FACTOR			1000
-static uint32_t runtime_estimate = 0;	// units: percent*1000
+//static uint32_t runtime_estimate = 0;	// units: percent*1000
 //static uint32_t fuel_p0 = 0;	// units: percent*1000
 //static uint32_t fuel_t0 = 0;	// units: percent*1000
 #define MAX17043_to_mV	1.25
@@ -1576,7 +1577,8 @@ FRESULT sd_values_update() {
 
 //	f_lseek(&file, 0);
 	ff_result = f_write(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_written);
-	ff_result = f_write(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_written);
+//	ff_result = f_write(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_written);
+	ff_result = f_write(&file, &on_logging, sizeof(on_logging), (UINT *) &bytes_written);
 	ff_result = f_write(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_written);
 
 	return ff_result;
@@ -1590,7 +1592,8 @@ FRESULT sd_values_read() {
 
 //	f_lseek(&file, 0);
 	ff_result = f_read(&file, &start_byte, sizeof(start_byte), (UINT *) &bytes_read);
-	ff_result = f_read(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_read);
+//	ff_result = f_read(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_read);
+	ff_result = f_read(&file, &on_logging, sizeof(on_logging), (UINT *) &bytes_read);
 	ff_result = f_read(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_read);
 
 	return ff_result;
@@ -2249,6 +2252,8 @@ static void restart_measurements() {
 	//	test_all();	// Do a first measurement (otherwise we have to wait a full log_interval)
 //		adjusting_timer_start = true;
 		meas_loop_wait_done = true;
+	} else {
+		NRF_LOG_DEBUG("on_logging: %d, NOT restarted()", on_logging);
 	}
 }
 
@@ -3720,7 +3725,7 @@ static ret_code_t read_rtc()
     t.tm_isdst = 0;        // Is DST on? 1 = yes, 0 = no, -1 = unknown
     time_now = mktime(&t);
 
-    NRF_LOG_DEBUG("sizeof(time_now): %d", sizeof(time_now));
+//    NRF_LOG_DEBUG("sizeof(time_now): %d", sizeof(time_now));
 
     // Convert the temp and store
     int8_t temp3232a = rtc_temp_buff[0];	// signed int for integer portion of temp
@@ -3847,8 +3852,8 @@ static ret_code_t read_fuel_gauge() {
     APP_ERROR_CHECK(err_code);
     // Convert and save
     fuel_percent_raw = (cmd[0] << 8) | cmd[1];	// combine 2 bytes
-	NRF_LOG_DEBUG("cmd[0] = 0x%x", cmd[0]);
-	NRF_LOG_DEBUG("cmd[1] = 0x%x", cmd[1]);
+//	NRF_LOG_DEBUG("cmd[0] = 0x%x", cmd[0]);
+//	NRF_LOG_DEBUG("cmd[1] = 0x%x", cmd[1]);
 //	NRF_LOG_DEBUG("fuel_percent_raw = %d", fuel_percent_raw);
 	fuel_percent_raw = fuel_percent_raw/256.0 * 1000;	// convert to float, but leave 3 decimal places
 ////    fuel_percent_raw = fuel_percent_raw * (1000.0/256.0);	// convert to float, but leave 3 decimal places
@@ -3873,10 +3878,10 @@ static void calc_fuel_percent() {
 	if (battery_type_used != BAT_LIPO_2000mAh) {
 
 		//	float FUEL_SCALE_FACTOR = 2.589;
-		float battery_scale_factor = battery_scale_factors[battery_type_used];
+//		float battery_scale_factor = battery_scale_factors[battery_type_used];
 		float m = m_batt[battery_type_used];
 		float b = b_batt[battery_type_used];
-		NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factor*1000);
+//		NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factor*1000);
 
 		// Use empirical linear fit
 		fuel_percent = 100*1000 * (m*fuel_v_cell + b);
@@ -4878,9 +4883,9 @@ void get_data() {
 		nrf_drv_saadc_sample_convert(BATTERY_CHANNEL_NUM, &battery_value);
 		nrf_delay_ms(PRE_READ_WAIT);
 
-		NRF_LOG_DEBUG("Sampling...");
+//		NRF_LOG_DEBUG("Sampling...");
 		nrf_drv_saadc_sample_convert(BATTERY_CHANNEL_NUM, &battery_value);
-		NRF_LOG_DEBUG("V_to_adc_1000: %d", V_to_adc_1000);
+//		NRF_LOG_DEBUG("V_to_adc_1000: %d", V_to_adc_1000);
 //		NRF_LOG_DEBUG("battery_value (mV): %d", battery_value*adc_to_V*1000);
 		NRF_LOG_INFO("battery_value (mV): %d", battery_value*1000*1000/V_to_adc_1000);
 //		NRF_LOG_DEBUG("adc_to_V*1000: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(adc_to_V*1000));
@@ -4928,7 +4933,7 @@ void get_data() {
 		NRF_LOG_INFO("fuel_v_cell: %d", fuel_v_cell);
 		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
 		NRF_LOG_INFO("fuel_percent: %d", fuel_percent);
-		NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
+//		NRF_LOG_INFO("runtime_estimate: %d", runtime_estimate);
 	}
 
 
@@ -5034,8 +5039,8 @@ void get_data() {
 
 		NRF_LOG_INFO("plantower_2_5_value = %d", plantower_2_5_value);
 		NRF_LOG_INFO("plantower_10_value = %d", plantower_10_value);
-		NRF_LOG_DEBUG("&plantower_2_5_value = %d", &plantower_2_5_value);
-		NRF_LOG_DEBUG("&plantower_10_value = %d", &plantower_10_value);
+//		NRF_LOG_DEBUG("&plantower_2_5_value = %d", &plantower_2_5_value);
+//		NRF_LOG_DEBUG("&plantower_10_value = %d", &plantower_10_value);
 	}
 //}	// REMOVE
 
@@ -5089,7 +5094,7 @@ void get_data() {
 		nrf_drv_saadc_sample_convert(SPEC_CO_CHANNEL_NUM, &specCO_temp);
 		nrf_delay_ms(PRE_READ_WAIT);
 
-		NRF_LOG_DEBUG("Sampling...");
+//		NRF_LOG_DEBUG("Sampling...");
 		int specCO_total = 0;
 		// read it a bunch of times and then average
 		for (int i = 0; i < 128; i++) {
@@ -5099,12 +5104,12 @@ void get_data() {
 			nrf_delay_ms(SPEC_CO_DELAY);
 		}
 
-		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
+//		NRF_LOG_DEBUG("specCO_temp: %d", specCO_temp);
 
 //		specCO_value = specCO_total/128.0f;
 //		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
 		specCO_value = specCO_total/128;
-		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
+//		NRF_LOG_DEBUG("specCO_value: %d", specCO_value);
 //		NRF_LOG_DEBUG("specCO_value (mV): %d", specCO_value*1000*1000/V_to_adc_1000);
 		NRF_LOG_INFO("specCO_value (mV): %d", specCO_value*adc_to_mV);
 	}
@@ -5295,7 +5300,7 @@ int test_main() {
 		// Read all of the sensors
 		get_data();
 		// Save the data to SD card
-		if (!is_live_streaming && using_component(SDC, components_used)) {
+		if (!testing_sensors && !is_live_streaming && using_component(SDC, components_used)) {
 			save_data();
 		}
 
@@ -5366,10 +5371,10 @@ int test_main() {
 
     // Ending stuff
     avoided_error_cnt_total += avoided_error_cnt;
-	NRF_LOG_DEBUG("avoided_error_cnt = %d", avoided_error_cnt);
-	NRF_LOG_DEBUG("avoided_error_cnt_total = %d", avoided_error_cnt_total);
+//	NRF_LOG_DEBUG("avoided_error_cnt = %d", avoided_error_cnt);
+//	NRF_LOG_DEBUG("avoided_error_cnt_total = %d", avoided_error_cnt_total);
 	if (avoided_error_cnt > 0) {
-		NRF_LOG_DEBUG("** ERRORS AVOIDED! **");
+		NRF_LOG_WARNING("** ERRORS AVOIDED! **");
 
 	}
 	NRF_LOG_FLUSH();
@@ -5742,6 +5747,14 @@ int main(void) {
 ////		restart_measurements(log_interval);
 //		restart_measurements();
 //	}
+	if (!on_logging) {
+	    NRF_LOG_DEBUG("Testing Sensors..");
+	    nrf_delay_ms(500);
+		testing_sensors = true;
+    	test_all();
+		testing_sensors = false;
+	}
+
 	restart_measurements();
 
     // Enter main loop.
