@@ -131,7 +131,7 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
@@ -409,6 +409,7 @@ FRESULT ff_result;
 char* TEST_STRING = "SD card test, v09.\r\n";
 static int header_is_written = 0;
 static bool sd_write_failed = false;
+static bool skipping_sdc_write = false;
 
 /** ADC Card Variables.  From example: example_code/saadc_simpler	**/
 #define SAMPLES_IN_BUFFER 1		// It will read each time, but only enter saadc_callback() after buffer is full
@@ -623,7 +624,7 @@ static int wdt_triggered = 0;
 static int dht_startup_wait_done = 0;
 APP_TIMER_DEF(dht_startup_timer);
 static int hpm_startup_wait_done = 0;
-static volatile bool ignoring_next_meas_loop = false;
+static volatile bool skipping_next_meas_loop = false;
 APP_TIMER_DEF(hpm_startup_timer);
 static volatile bool meas_loop_wait_done = false;
 static volatile bool plantower_startup_wait_done = false;
@@ -1837,6 +1838,7 @@ static void send_sdc_packets() {
 			sdc_buff_current_pos += send_length;
 			bytes_remaining -= send_length;
 			start_byte += send_length;
+			end_byte += send_length;
 			cnt++;
 
 			// Check if we read all the SDC and sent the remaining data
@@ -2206,6 +2208,7 @@ static void stop_measurements() {
 	// Start the loop timer to trigger measurements
 	NRF_LOG_DEBUG("In stop_measurements()");
 	err_code = app_timer_stop(meas_loop_timer);
+//	NRF_LOG_WARNING("WARNING: %d, app_timer_stop(meas_loop_timer)", err_code);
 	APP_ERROR_CHECK(err_code);
 	is_logging = false;	// flag that we have stopped running
 //	on_logging = false;	// flag that we have stopped running
@@ -2350,6 +2353,11 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		if(data_buffer == 0x0001) {
 			p_our_service->data_offload_handles.is_enabled = true;
 			NRF_LOG_INFO("p_our_service->data_offload_handles.is_enabled: %d", p_our_service->data_offload_handles.is_enabled);
+
+			// Do some checking before we start the offload process
+			if (start_byte > end_byte) {
+				start_byte = end_byte;
+			}
 
 //			// Make sure we aren't in the measuring loop, since SDC might already init/uninit
 //			NRF_LOG_INFO("Waiting for in_measuring_loop..");
@@ -4629,8 +4637,8 @@ void get_data() {
 			uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 			if (time_to_wait_s < 2*max_sensor_wait_ms/1000) {	// Make sure we wait more than the sensor wait time; don't want to adjust time while still measuring
 				time_to_wait_s += log_interval/1000;
-				ignoring_next_meas_loop = true;
-				NRF_LOG_INFO("ignoring_next_meas_loop: %d", ignoring_next_meas_loop);
+				skipping_next_meas_loop = true;
+				NRF_LOG_INFO("skipping_next_meas_loop: %d", skipping_next_meas_loop);
 			}
 			NRF_LOG_INFO("time_to_wait_s: %d", time_to_wait_s);
 		    start_adjustment_wait_done = false;
@@ -5300,7 +5308,7 @@ int test_main() {
 		// Read all of the sensors
 		get_data();
 		// Save the data to SD card
-		if (!testing_sensors && !is_live_streaming && using_component(SDC, components_used)) {
+		if (!skipping_sdc_write && using_component(SDC, components_used)) {
 			save_data();
 		}
 
@@ -5411,6 +5419,13 @@ static void test_all()
 	// Show that we're measuring, check it later so it doesn't interfere with BLE
 	in_measuring_loop = true;
 
+	// Set some flags now, so we know what state we were in at the start of the loop
+	skipping_sdc_write =
+			is_live_streaming 		||
+			testing_sensors			||
+			adjusting_timer_start;
+
+	// MAIN ACTION IS HERE
 	err_cnt = test_main();
 	err_cnt_total += err_cnt;
 
@@ -5499,8 +5514,8 @@ static void test_all()
 
 	// Final stuff to do before going back to sleep
 	meas_loop_wait_done = false;
-	check_min_battery_level();
 	in_measuring_loop = false;
+	check_min_battery_level();
 
 
 }
@@ -5511,9 +5526,9 @@ static void test_all()
 
 // Timeout handlers for startup waits with the single shot timers
 static void meas_loop_handler(void * p_context) {
-	if (ignoring_next_meas_loop) {
+	if (skipping_next_meas_loop) {
 		meas_loop_wait_done = false;
-		ignoring_next_meas_loop = false;
+		skipping_next_meas_loop = false;
 	} else {
 		meas_loop_wait_done = true;
 	}
@@ -5748,7 +5763,7 @@ int main(void) {
 //		restart_measurements();
 //	}
 	if (!on_logging) {
-	    NRF_LOG_DEBUG("Testing Sensors..");
+	    NRF_LOG_DEBUG("---TESTING SENSORS..");
 	    nrf_delay_ms(500);
 		testing_sensors = true;
     	test_all();
@@ -5770,7 +5785,7 @@ int main(void) {
 //        	stop_measurements();
         	restart_measurements();
         	start_adjustment_wait_done = false;
-        	adjusting_timer_start = false;
+        	adjusting_timer_start = false;	// reset flag
 			NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
         }
 //        if (updating_end_byte) {
