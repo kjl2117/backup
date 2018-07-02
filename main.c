@@ -2679,6 +2679,9 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             // LED indication will be changed when advertising starts.
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             is_live_streaming = false;
+            if (using_live_stream_interval) {
+    			restart_measurements();
+            }
             break;
 
 #ifndef S140
