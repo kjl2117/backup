@@ -2208,8 +2208,8 @@ static void stop_measurements() {
 	// Start the loop timer to trigger measurements
 	NRF_LOG_DEBUG("In stop_measurements()");
 	err_code = app_timer_stop(meas_loop_timer);
-//	NRF_LOG_WARNING("WARNING: %d, app_timer_stop(meas_loop_timer)", err_code);
-	APP_ERROR_CHECK(err_code);
+	NRF_LOG_WARNING("** WARNING: %d, app_timer_stop(meas_loop_timer)", err_code);
+//	APP_ERROR_CHECK(err_code);
 	is_logging = false;	// flag that we have stopped running
 //	on_logging = false;	// flag that we have stopped running
 //	using_live_stream_interval = false;
@@ -4643,7 +4643,8 @@ void get_data() {
 			NRF_LOG_INFO("time_to_wait_s: %d", time_to_wait_s);
 		    start_adjustment_wait_done = false;
 			err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(time_to_wait_s*1000), NULL);
-			APP_ERROR_CHECK(err_code);
+			NRF_LOG_WARNING("** WARNING: %d, app_timer_start(start_adjustment_timer)", err_code);
+//			APP_ERROR_CHECK(err_code);
 		}
 
 		// Print the reading
