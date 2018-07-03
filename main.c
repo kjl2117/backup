@@ -1846,7 +1846,7 @@ static void send_sdc_packets() {
 			sdc_buff_current_pos += send_length;
 			bytes_remaining -= send_length;
 			start_byte += send_length;
-			end_byte += send_length;
+//			end_byte += send_length;
 			cnt++;
 
 			// Check if we read all the SDC and sent the remaining data
