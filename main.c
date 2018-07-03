@@ -133,9 +133,11 @@ static void stop_measurements();
 /** Overall **/
 #define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
+#define DELETE_ALL_FILES			0	// If we want to clear the SD card
+#define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
+static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
 static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -1582,6 +1584,8 @@ FRESULT sd_values_update() {
 	ff_result = f_write(&file, &on_logging, sizeof(on_logging), (UINT *) &bytes_written);
 	ff_result = f_write(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_written);
 
+    sd_close();
+
 	return ff_result;
 }
 
@@ -1596,6 +1600,8 @@ FRESULT sd_values_read() {
 //	ff_result = f_read(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_read);
 	ff_result = f_read(&file, &on_logging, sizeof(on_logging), (UINT *) &bytes_read);
 	ff_result = f_read(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_read);
+
+    sd_close();
 
 	return ff_result;
 }
@@ -1624,6 +1630,8 @@ FRESULT sd_info_create() {
     	err_cnt++;
     }
     sd_write_str(out_str);
+
+    sd_close();
 
 	return ff_result;
 }
@@ -2208,7 +2216,9 @@ static void stop_measurements() {
 	// Start the loop timer to trigger measurements
 	NRF_LOG_DEBUG("In stop_measurements()");
 	err_code = app_timer_stop(meas_loop_timer);
-	NRF_LOG_WARNING("** WARNING: %d, app_timer_stop(meas_loop_timer)", err_code);
+	if (err_code) {
+		NRF_LOG_WARNING("** WARNING: %d, app_timer_stop(meas_loop_timer)", err_code);
+	}
 //	APP_ERROR_CHECK(err_code);
 	is_logging = false;	// flag that we have stopped running
 //	on_logging = false;	// flag that we have stopped running
@@ -4646,7 +4656,9 @@ void get_data() {
 			NRF_LOG_INFO("time_to_wait_s: %d", time_to_wait_s);
 		    start_adjustment_wait_done = false;
 			err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(time_to_wait_s*1000), NULL);
-			NRF_LOG_WARNING("** WARNING: %d, app_timer_start(start_adjustment_timer)", err_code);
+			if (err_code) {
+				NRF_LOG_WARNING("** WARNING: %d, app_timer_start(start_adjustment_timer)", err_code);
+			}
 //			APP_ERROR_CHECK(err_code);
 		}
 
@@ -5716,6 +5728,27 @@ int main(void) {
 	sd_init();
 	sd_mount();
 
+	// Option to delete the initial values, so it doesn't keep overwriting the FW values
+	if (RESET_VALUES_FILE) {
+		NRF_LOG_WARNING("Deleting %s", VALUES_FILE_NAME);
+		ff_result = f_unlink(VALUES_FILE_NAME);
+		if (ff_result != FR_OK) NRF_LOG_WARNING("f_unlink(VALUES_FILE_NAME) ff_result: %d", ff_result);
+	}
+
+	// Option to delete ALL sd card files, to start fresh
+	if (DELETE_ALL_FILES) {
+		NRF_LOG_WARNING("Deleting ALL Files..");
+		ff_result = f_unlink(VALUES_FILE_NAME);
+		if (ff_result != FR_OK) NRF_LOG_WARNING("f_unlink(VALUES_FILE_NAME) ff_result: %d", ff_result);
+		ff_result = f_unlink(INFO_FILE_NAME);
+		if (ff_result != FR_OK) NRF_LOG_WARNING("f_unlink(INFO_FILE_NAME) ff_result: %d", ff_result);
+		ff_result = f_unlink(LOG_FILE_NAME);
+		if (ff_result != FR_OK) NRF_LOG_WARNING("f_unlink(LOG_FILE_NAME) ff_result: %d", ff_result);
+		ff_result = f_unlink(EXTRA_LOG_FILE_NAME);
+		if (ff_result != FR_OK) NRF_LOG_WARNING("f_unlink(EXTRA_LOG_FILE_NAME) ff_result: %d", ff_result);
+	}
+
+
 	// The initial values stored on the SD card
 	FRESULT ff_result_stat = f_stat(VALUES_FILE_NAME, NULL);
 	if (ff_result_stat == FR_NO_FILE) {
@@ -5724,13 +5757,13 @@ int main(void) {
 //		ff_result = sd_values_create();
 		ff_result = sd_values_update();
 		if (ff_result != FR_OK) NRF_LOG_WARNING("sd_values_create() ff_result: %d", ff_result);
-	    sd_close();
+//	    sd_close();
 	} else if(ff_result_stat == FR_OK) {
 		if (READING_VALUES_FILE) {
 			NRF_LOG_INFO("Reading in previous config file..");
 			ff_result = sd_values_read();
 			if (ff_result != FR_OK) NRF_LOG_WARNING("sd_values_read() ff_result: %d", ff_result);
-		    sd_close();
+//		    sd_close();
 		}
 	} else {
 		NRF_LOG_WARNING("ff_result_stat: %d", ff_result_stat);
@@ -5742,7 +5775,7 @@ int main(void) {
 	if (ff_result != FR_OK) NRF_LOG_WARNING("sd_info_create() ff_result: %d", ff_result);
 
 	// Clean up SD card stuff
-	sd_close();
+//	sd_close();
 	sd_uninit();
 	sd_power_off();
 
@@ -5754,8 +5787,6 @@ int main(void) {
 //    err_code = ble_advertising_start(&m_advertising, BLE_ADV_MODE_SLOW);	// Unknown error
     APP_ERROR_CHECK(err_code);
 
-    // Let the user read the startup messages
-	nrf_delay_ms(INITIAL_MSG_WAIT);
 
     // Start timer for main measurement loop
 //	err_code = app_timer_start(meas_loop_timer, APP_TIMER_TICKS(log_interval), NULL);
@@ -5773,6 +5804,10 @@ int main(void) {
     	test_all();
 		testing_sensors = false;
 	}
+
+    // Let the user read the startup messages
+	nrf_delay_ms(INITIAL_MSG_WAIT);
+
 
 	restart_measurements();
 
@@ -5828,7 +5863,7 @@ int main(void) {
 			sd_values_update();
 
 			// Start the SD card
-		    sd_close();
+//		    sd_close();
 			sd_uninit();
 			sd_power_off();
 
