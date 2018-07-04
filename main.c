@@ -131,14 +131,14 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
-#define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
+#define RESET_VALUES_FILE			1	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
 static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 100*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -571,6 +571,7 @@ static uint16_t ambient_CH1;
 #define VEML6070_ADDR_H 0x39 ///< High address
 #define VEML6070_ADDR_L 0x38 ///< Low address
 static uint8_t UVA_integration_time = 3;	// default 1
+#define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
 static uint16_t uva_value;
 
 
@@ -1316,9 +1317,15 @@ ret_code_t timer_timeout_handler(void * p_context)
 	// Ambient Light CH1
     if (product_service.ambient_CH1_handles.is_enabled) {
 		static int16_t previous_ambient_CH1 = 0; // Declare a variable to store current temperature until next measurement.
+
+		NRF_LOG_DEBUG("Before sending ambient_CH1: %d", ambient_CH1);
+
 		// Check if current value is different from last value
 	    if(ambient_CH1 != previous_ambient_CH1) {
-			// If new value then send notification
+
+			NRF_LOG_DEBUG("After comparing previous_ambient_CH1: %d", previous_ambient_CH1);
+
+	    	// If new value then send notification
 			err_code = custom_characteristic_update(&product_service, &product_service.ambient_CH1_handles, &ambient_CH1, sizeof(ambient_CH1));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
@@ -1333,8 +1340,14 @@ ret_code_t timer_timeout_handler(void * p_context)
 	// UVA
     if (product_service.uva_handles.is_enabled) {
 		static int16_t previous_UVA_value = 0; // Declare a variable to store current temperature until next measurement.
+
+		NRF_LOG_DEBUG("Before sending uva_value: %d", uva_value);
+
 		// Check if current value is different from last value
 	    if(uva_value != previous_UVA_value) {
+
+			NRF_LOG_DEBUG("After comparing previous_UVA_value: %d", previous_UVA_value);
+
 			// If new value then send notification
 			err_code = custom_characteristic_update(&product_service, &product_service.uva_handles, &uva_value, sizeof(uva_value));
 			if (err_code != NRF_SUCCESS) {
@@ -5011,6 +5024,10 @@ void get_data() {
 //		nrf_delay_ms(1000);	// wait for some measurements
 //		UVA_set_control(UVA_integration_time, false);
 //		nrf_delay_ms(1000);	// wait for some measurements
+
+		// NOTE: need to wait a bit to integrate measurement
+		nrf_delay_ms(UVA_VEML_MEAS_DELAY);
+
 
 		// Read the data
 		err_code = UVA_read();
