@@ -175,6 +175,7 @@ static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
 #define INITIAL_MSG_WAIT			3000	// <500 causes issues?
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
+#define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
 
 
 // The different sensors (used for choosing which sensor code to run)
@@ -229,6 +230,7 @@ typedef enum {
 	#define PRODUCT_STR		"SUM"
 	static char product_FW_version[] = 		"SUM_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+	static uint32_t max_sensor_wait_ms = 2*UVA_VEML_MEAS_DELAY;
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -250,6 +252,7 @@ typedef enum {
 	#define PRODUCT_STR		"HAP"
 	static char product_FW_version[] = 		"HAP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
 //		ADP,		// DIG
@@ -273,6 +276,7 @@ typedef enum {
 	#define PRODUCT_STR		"BATTERY_TEST"
 	static char product_FW_version[] = 		"BATTERY_TEST_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 #elif PRODUCT_TYPE == WAIT_TIME_TEST
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -296,6 +300,7 @@ typedef enum {
 	#define PRODUCT_STR		"WAIT_TIME_TEST"
 	static char product_FW_version[] = 		"WAIT_TIME_TEST_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 #else
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -321,6 +326,7 @@ typedef enum {
 	#define PRODUCT_STR		"CUSTOM"
 	static char product_FW_version[] = 		"CUSTOM_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
@@ -571,7 +577,6 @@ static uint16_t ambient_CH1;
 #define VEML6070_ADDR_H 0x39 ///< High address
 #define VEML6070_ADDR_L 0x38 ///< Low address
 static uint8_t UVA_integration_time = 3;	// default 1
-#define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
 static uint16_t uva_value;
 
 
@@ -1139,10 +1144,10 @@ ret_code_t custom_characteristic_update(ble_custom_service_t *p_our_service, ble
 }
 
 // ALREADY_DONE_FOR_YOU: This is a timer event handler
-//static void timer_timeout_handler(void * p_context)
-ret_code_t timer_timeout_handler(void * p_context)
+//static void push_live_stream_values(void * p_context)
+ret_code_t push_live_stream_values(void * p_context)
 {
-	NRF_LOG_DEBUG("In timer_timeout_handler()");
+	NRF_LOG_DEBUG("In push_live_stream_values()");
 
 //    // OUR_JOB: Step 3.F, Update temperature and characteristic value.
 //    int32_t temperature = 0;    // Declare variable holding temperature value
@@ -1318,12 +1323,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     if (product_service.ambient_CH1_handles.is_enabled) {
 		static int16_t previous_ambient_CH1 = 0; // Declare a variable to store current temperature until next measurement.
 
-		NRF_LOG_DEBUG("Before sending ambient_CH1: %d", ambient_CH1);
+//		NRF_LOG_DEBUG("Before sending ambient_CH1: %d", ambient_CH1);
 
 		// Check if current value is different from last value
 	    if(ambient_CH1 != previous_ambient_CH1) {
 
-			NRF_LOG_DEBUG("After comparing previous_ambient_CH1: %d", previous_ambient_CH1);
+//			NRF_LOG_DEBUG("After comparing previous_ambient_CH1: %d", previous_ambient_CH1);
 
 	    	// If new value then send notification
 			err_code = custom_characteristic_update(&product_service, &product_service.ambient_CH1_handles, &ambient_CH1, sizeof(ambient_CH1));
@@ -1341,12 +1346,12 @@ ret_code_t timer_timeout_handler(void * p_context)
     if (product_service.uva_handles.is_enabled) {
 		static int16_t previous_UVA_value = 0; // Declare a variable to store current temperature until next measurement.
 
-		NRF_LOG_DEBUG("Before sending uva_value: %d", uva_value);
+//		NRF_LOG_DEBUG("Before sending uva_value: %d", uva_value);
 
 		// Check if current value is different from last value
 	    if(uva_value != previous_UVA_value) {
 
-			NRF_LOG_DEBUG("After comparing previous_UVA_value: %d", previous_UVA_value);
+//			NRF_LOG_DEBUG("After comparing previous_UVA_value: %d", previous_UVA_value);
 
 			// If new value then send notification
 			err_code = custom_characteristic_update(&product_service, &product_service.uva_handles, &uva_value, sizeof(uva_value));
@@ -1362,7 +1367,7 @@ ret_code_t timer_timeout_handler(void * p_context)
 
 
 
-	NRF_LOG_DEBUG("OUT timer_timeout_handler()");
+	NRF_LOG_DEBUG("OUT push_live_stream_values()");
 	return NRF_SUCCESS;
 
 }
@@ -4660,7 +4665,7 @@ void get_data() {
 		// Try to make all of the measurement timers sync'ed to start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
 		if (adjusting_timer_start) {
 			int32_t time_to_wait_s = log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;
-			uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+//			uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 			if (time_to_wait_s < 2*max_sensor_wait_ms/1000) {	// Make sure we wait more than the sensor wait time; don't want to adjust time while still measuring
 				time_to_wait_s += log_interval/1000;
 				skipping_next_meas_loop = true;
@@ -5508,11 +5513,11 @@ static void test_all()
 	// Push values to App if Live Streaming
 	if (is_live_streaming) {
 		for (int i=0; i < APP_PUSH_RETRY_NUM; i++) {	// Keep trying
-			err_code = timer_timeout_handler(NULL);
+			err_code = push_live_stream_values(NULL);
 			if (err_code == NRF_SUCCESS) break;
 		}
 		if (err_code) {
-			NRF_LOG_ERROR("** ERROR: Figaro CO2 read, err_code=%d **", err_code);
+			NRF_LOG_ERROR("** ERROR: push_live_stream_values(), err_code=%d **", err_code);
 		}
 
 	}
@@ -5644,7 +5649,7 @@ static void timers_init(void)
 //    // For live stream BLE
 //    err_code = app_timer_create(&m_our_char_timer_id,
 //    							APP_TIMER_MODE_REPEATED,
-//								timer_timeout_handler);	// sets a flag when timer expires
+//								push_live_stream_values);	// sets a flag when timer expires
 //    APP_ERROR_CHECK(err_code);
 
 
