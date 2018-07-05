@@ -785,6 +785,20 @@ static bool using_live_stream_interval = false;
 
 #define DATA_OFFLOAD_PACKET_SIZE	20
 
+// LiveStream variables
+static int16_t previous_plantower_2_5_value = 0; // Declare a variable to store current temperature until next measurement.
+static int16_t previous_plantower_10_value = 0;
+static int16_t previous_specCO_value = 0;
+static int16_t previous_figCO2_value = 0;
+static int16_t previous_bme_humidity = 0;
+static int16_t previous_bme_temp_C = 0;
+static int16_t previous_rtc_temp = 0;
+static int16_t previous_temp_nrf = 0;
+static int16_t previous_ambient_CH0 = 0;
+static int16_t previous_ambient_CH1 = 0;
+static int16_t previous_UVA_value = 0;
+
+
 // Structure for our custom service (generic)
 // NOTE: bool values are by default set to 0 in custom_service_init()
 typedef struct
@@ -1145,7 +1159,7 @@ ret_code_t custom_characteristic_update(ble_custom_service_t *p_our_service, ble
 
 // ALREADY_DONE_FOR_YOU: This is a timer event handler
 //static void push_live_stream_values(void * p_context)
-ret_code_t push_live_stream_values(void * p_context)
+ret_code_t push_live_stream_values()
 {
 	NRF_LOG_DEBUG("In push_live_stream_values()");
 
@@ -1169,7 +1183,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // Plantower PM2_5
     if (product_service.pm2_5_handles.is_enabled) {
-		static int16_t previous_plantower_2_5_value = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_plantower_2_5_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(plantower_2_5_value != previous_plantower_2_5_value) {
 			// If new value then send notification
@@ -1185,7 +1199,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // Plantower PM10
     if (product_service.pm10_handles.is_enabled) {
-		static int16_t previous_plantower_10_value = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_plantower_10_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(plantower_10_value != previous_plantower_10_value) {
 			// If new value then send notification
@@ -1202,7 +1216,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // Spec CO
     if (product_service.co_handles.is_enabled) {
-		static int16_t previous_specCO_value = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_specCO_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(specCO_value != previous_specCO_value) {
 			// If new value then send notification
@@ -1219,7 +1233,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // Figaro CO2
     if (product_service.co2_handles.is_enabled) {
-		static int16_t previous_figCO2_value = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_figCO2_value = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(figCO2_value != previous_figCO2_value) {
 			// If new value then send notification
@@ -1236,7 +1250,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // BME Humidity
     if (product_service.rh_handles.is_enabled) {
-		static int16_t previous_bme_humidity = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_bme_humidity = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(bme_humidity != previous_bme_humidity) {
 			// If new value then send notification
@@ -1253,7 +1267,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // BME Temp
     if (product_service.temp_bme_handles.is_enabled) {
-		static int16_t previous_bme_temp_C = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_bme_temp_C = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(bme_temp_C != previous_bme_temp_C) {
 			// If new value then send notification
@@ -1270,14 +1284,15 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // RTC Temp
     if (product_service.temp_rtc_handles.is_enabled) {
-		static int16_t previous_rtc_temp = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_rtc_temp = 0; // Declare a variable to store current temperature until next measurement.
 
-		NRF_LOG_DEBUG("Before sending rtc_temp: %d", rtc_temp);
+//		NRF_LOG_DEBUG("Before sending rtc_temp: %d", rtc_temp);
+//		NRF_LOG_DEBUG("Before sending previous_rtc_temp: %d", previous_rtc_temp);
 
 		// Check if current value is different from last value
 	    if(rtc_temp != previous_rtc_temp) {
 
-			NRF_LOG_DEBUG("After comparing previous_rtc_temp: %d", previous_rtc_temp);
+//			NRF_LOG_DEBUG("After comparing previous_rtc_temp: %d", previous_rtc_temp);
 
 			// If new value then send notification
 			err_code = custom_characteristic_update(&product_service, &product_service.temp_rtc_handles, &rtc_temp, sizeof(rtc_temp));
@@ -1293,7 +1308,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
     // nRF Temp
     if (product_service.temp_nrf_handles.is_enabled) {
-		static int16_t previous_temp_nrf = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_temp_nrf = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(temp_nrf != previous_temp_nrf) {
 			// If new value then send notification
@@ -1310,7 +1325,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
 	// Ambient Light CH0
     if (product_service.ambient_CH0_handles.is_enabled) {
-		static int16_t previous_ambient_CH0 = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_ambient_CH0 = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
 	    if(ambient_CH0 != previous_ambient_CH0) {
 			// If new value then send notification
@@ -1327,7 +1342,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
 	// Ambient Light CH1
     if (product_service.ambient_CH1_handles.is_enabled) {
-		static int16_t previous_ambient_CH1 = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_ambient_CH1 = 0; // Declare a variable to store current temperature until next measurement.
 
 //		NRF_LOG_DEBUG("Before sending ambient_CH1: %d", ambient_CH1);
 
@@ -1350,7 +1365,7 @@ ret_code_t push_live_stream_values(void * p_context)
 
 	// UVA
     if (product_service.uva_handles.is_enabled) {
-		static int16_t previous_UVA_value = 0; // Declare a variable to store current temperature until next measurement.
+//		static int16_t previous_UVA_value = 0; // Declare a variable to store current temperature until next measurement.
 
 //		NRF_LOG_DEBUG("Before sending uva_value: %d", uva_value);
 
@@ -2622,6 +2637,20 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		if (!using_live_stream_interval && is_live_streaming) {
 	//		app_timer_start(m_our_char_timer_id, APP_TIMER_TICKS(LIVE_STREAM_LOG_INTERVAL), NULL);
 	//		using_live_stream_interval = true;
+
+			// Reset the temp variables before restarting livestream
+			NRF_LOG_DEBUG("Resetting LiveStream values..");
+			previous_plantower_2_5_value = 0; // Declare a variable to store current temperature until next measurement.
+			previous_plantower_10_value = 0;
+			previous_specCO_value = 0;
+			previous_figCO2_value = 0;
+			previous_bme_humidity = 0;
+			previous_bme_temp_C = 0;
+			previous_rtc_temp = 0;
+			previous_temp_nrf = 0;
+			previous_ambient_CH0 = 0;
+			previous_ambient_CH1 = 0;
+			previous_UVA_value = 0;
 
 //			stop_measurements();
 	//		restart_measurements(LIVE_STREAM_LOG_INTERVAL);	// NOTE: will auto-choose LIVE_STREAM_LOG_INTERVAL in restart_measurements()
@@ -5519,8 +5548,13 @@ static void test_all()
 	// Push values to App if Live Streaming
 	if (is_live_streaming) {
 		for (int i=0; i < APP_PUSH_RETRY_NUM; i++) {	// Keep trying
-			err_code = push_live_stream_values(NULL);
-			if (err_code == NRF_SUCCESS) break;
+			err_code = push_live_stream_values();
+			if (err_code == NRF_SUCCESS) {
+				break;
+			} else {
+				NRF_LOG_WARNING("** WARNING: Trying again: push_live_stream_values(), err_code=%d **", err_code);
+				nrf_delay_ms(MAX_CONN_INTERVAL*1.25);
+			}
 		}
 		if (err_code) {
 			NRF_LOG_ERROR("** ERROR: push_live_stream_values(), err_code=%d **", err_code);
