@@ -138,7 +138,7 @@ static void stop_measurements();
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
 static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 100*1000;	//60*1000;	// units: ms
+static uint32_t log_interval = 10*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -567,9 +567,9 @@ static uint16_t UV_SI1145_UV_value = 0;		// units: 100*UV Index
 //#define LTR303_DATA_CH1_1    0x89
 //#define LTR303_DATA_CH0_0    0x8A
 //#define LTR303_DATA_CH0_1    0x8B
-static uint8_t LTR329_gain = 0;				// default 0
-static uint8_t LTR329_integration_time = 0;	// default 0
-static uint8_t LTR329_meas_rate = 3;			// default 3
+static uint8_t LTR329_gain = 0;					// default 0: 1X
+static uint8_t LTR329_integration_time = 1;		// default 0: 100ms, but also try 1: 50ms
+static uint8_t LTR329_meas_rate = 1;			// default 3: 500ms, but also try 1: 100ms
 static uint16_t ambient_CH0;
 static uint16_t ambient_CH1;
 
@@ -1271,8 +1271,14 @@ ret_code_t push_live_stream_values(void * p_context)
     // RTC Temp
     if (product_service.temp_rtc_handles.is_enabled) {
 		static int16_t previous_rtc_temp = 0; // Declare a variable to store current temperature until next measurement.
+
+		NRF_LOG_DEBUG("Before sending rtc_temp: %d", rtc_temp);
+
 		// Check if current value is different from last value
 	    if(rtc_temp != previous_rtc_temp) {
+
+			NRF_LOG_DEBUG("After comparing previous_rtc_temp: %d", previous_rtc_temp);
+
 			// If new value then send notification
 			err_code = custom_characteristic_update(&product_service, &product_service.temp_rtc_handles, &rtc_temp, sizeof(rtc_temp));
 			if (err_code != NRF_SUCCESS) {
