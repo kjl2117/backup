@@ -134,11 +134,11 @@ static void stop_measurements();
 #define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
-#define RESET_VALUES_FILE			1	// If we want to delete the initial values, to use FW values instead
+#define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 10*1000;	//60*1000;	// units: ms
+static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
+static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -153,6 +153,14 @@ static uint32_t log_interval = 10*1000;	//60*1000;	// units: ms
 //#define FIGARO_CO2_STARTUP_WAIT_TIME	3*1000	// 2*1000 is too small, only reading value==360
 #define FUEL_GAUGE_RCOMP	0x97	// Config value to adjust for Custom batteries
 
+#define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
+//#define NUM_SAMPLES_PER_ON_CYCLE	150	//1	//150	// 1,	20
+#define WAIT_BETWEEN_SAMPLES		0	//0	//200	// ms, waitin only if there are multiple samples
+//#define WAIT_BETWEEN_SAMPLES		200	//0	//200	// ms, waitin only if there are multiple samples
+#define INITIAL_FUEL_GAUGE_WAIT		5000	// <500 causes issues?
+#define INITIAL_MSG_WAIT			3000	// <500 causes issues?
+#define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
+
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
 //#define LOG_INTERVAL				1000*1000		// ms between sleep/wake
 //#define DEVICE_NAME                     "SENSEN_UART"                               /**< Name of device. Will be included in the advertising data. */
@@ -166,13 +174,6 @@ static uint32_t log_interval = 10*1000;	//60*1000;	// units: ms
 #define LOG_FILE_NAME   "datalog.txt"
 static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
 
-#define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
-//#define NUM_SAMPLES_PER_ON_CYCLE	150	//1	//150	// 1,	20
-#define WAIT_BETWEEN_SAMPLES		0	//0	//200	// ms, waitin only if there are multiple samples
-//#define WAIT_BETWEEN_SAMPLES		200	//0	//200	// ms, waitin only if there are multiple samples
-#define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
-#define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
-#define INITIAL_MSG_WAIT			3000	// <500 causes issues?
 #define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 #define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
@@ -330,11 +331,11 @@ typedef enum {
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
-static float battery_scale_factors[] = {
-		2.068,	// BAT_LIPO_1200mAh
-		1.0,	// BAT_LIPO_2000mAh,	NOT USED
-		2.589,	// BAT_LIPO_10Ah
-};
+//static float battery_scale_factors[] = {
+//		2.068,	// BAT_LIPO_1200mAh
+//		1.0,	// BAT_LIPO_2000mAh,	NOT USED
+//		2.589,	// BAT_LIPO_10Ah
+//};
 //static float battery_scale_factor = battery_scale_factors[battery_type_used];
 static float m_batt[] = {
 		0.001344399,	// BAT_LIPO_1200mAh
@@ -1659,10 +1660,12 @@ FRESULT sd_info_create() {
 			"Product: %s\r\n"
 //			"ble_gap_address = %X:%X:%X:%X:%X:%X\r\n"
 			"ble_gap_address = %02X:%02X:%02X:%02X:%02X:%02X\r\n"
-			"sensen_FW_version: %s\r\n",
+			"sensen_FW_version: %s\r\n"
+			"product_FW_version: %s\r\n",
 			PRODUCT_STR,
 			ble_gap_address.addr[5], ble_gap_address.addr[4], ble_gap_address.addr[3], ble_gap_address.addr[2], ble_gap_address.addr[1], ble_gap_address.addr[0],
-			sensen_FW_version
+			sensen_FW_version,
+			product_FW_version
 			);
     if (out_str_size > MAX_OUT_STR_SIZE) {
     	NRF_LOG_ERROR("** ERROR: out_str too big!, out_str_size=%d", out_str_size);
@@ -3432,6 +3435,8 @@ void twi_init (void)
        .frequency          = NRF_TWI_FREQ_100K,
        .interrupt_priority = APP_IRQ_PRIORITY_HIGH,
        .clear_bus_init     = false
+//       .clear_bus_init     = true,
+//	   .hold_bus_uninit		= true
     };
 
     err_code = nrf_drv_twi_init(&m_twi, &twi_config, NULL, NULL);
@@ -4727,15 +4732,22 @@ void get_data() {
 	}
 	// Init Ambient Light Sensor
 	if (using_component(AMBIENT_LTR, components_used)) {
+//	if (0 && using_component(AMBIENT_LTR, components_used)) {
 		// Init sensor
 		nrf_delay_ms(100);	// Required startup wait
+
+//		ambient_light_set_control(LTR329_gain, true, true);
+//		nrf_delay_ms(1000);	// Wakeup time
+
 		ambient_light_set_meas_rate(LTR329_integration_time, LTR329_meas_rate);
 		ambient_light_set_control(LTR329_gain, false, true);
+//		ambient_light_set_control(LTR329_gain, true, true);
 //		nrf_delay_ms(10);	// Wakeup time (Datasheet, but doesn't work if too small)
 		nrf_delay_ms(100);	// Wakeup time
 	}
 	// Init UVA Sensor
 	if (using_component(UVA_VEML, components_used)) {
+//	if (0 && using_component(UVA_VEML, components_used)) {
 		// Init sensor
 //		nrf_delay_ms(1000);	// wait for some measurements
 		UVA_set_control(UVA_integration_time, false);
@@ -5006,7 +5018,7 @@ void get_data() {
 		}
 
 		// Read Fuel
-		NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factors[battery_type_used]*1000);
+//		NRF_LOG_DEBUG("battery_scale_factor*1000: %d", battery_scale_factors[battery_type_used]*1000);
 		NRF_LOG_INFO("fuel_v_cell: %d", fuel_v_cell);
 		NRF_LOG_INFO("fuel_percent_raw: %d", fuel_percent_raw);
 		NRF_LOG_INFO("fuel_percent: %d", fuel_percent);
@@ -5397,6 +5409,16 @@ int test_main() {
 	// TWI (I2C) UNinit
     nrf_drv_twi_uninit(&m_twi);
 
+//    // FOR TESTING, REMOVE LATER
+//    nrf_delay_ms(2000);
+//	nrf_gpio_cfg_output(TWI_SCL_PIN);
+//	nrf_gpio_cfg_output(TWI_SDA_PIN);
+//	NRF_LOG_INFO("SDA/SCL: HIGH.");
+//	nrf_gpio_pin_set(TWI_SCL_PIN);	// Enable HIGH, Turn OFF ADP
+//	nrf_gpio_pin_set(TWI_SDA_PIN);	// Enable HIGH, Turn OFF ADP
+
+
+
     // ADP sleep, turn OFF all power
 	if (!is_live_streaming && using_component(ADP, components_used)) {
 		NRF_LOG_INFO("");
@@ -5761,6 +5783,17 @@ int main(void) {
     // Watchdog Timer
     wdt_init();
 //    wdt_init();
+
+
+//    // FOR TESTING, REMOVE LATER
+//    nrf_gpio_cfg_output(ADP1_PIN);
+//	nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH
+////	nrf_gpio_pin_set(ADP1_PIN);	// Enable HIGH
+//    nrf_gpio_cfg_output(ADP2_PIN);
+//	nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH
+////	nrf_gpio_pin_set(ADP2_PIN);	// Enable HIGH
+//	while (1) power_manage();
+
 
 
 	// Main section that uses sensors
