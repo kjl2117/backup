@@ -131,13 +131,13 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
+static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
 static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -157,8 +157,8 @@ static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //#define NUM_SAMPLES_PER_ON_CYCLE	150	//1	//150	// 1,	20
 #define WAIT_BETWEEN_SAMPLES		0	//0	//200	// ms, waitin only if there are multiple samples
 //#define WAIT_BETWEEN_SAMPLES		200	//0	//200	// ms, waitin only if there are multiple samples
-#define INITIAL_FUEL_GAUGE_WAIT		5000	// <500 causes issues?
-#define INITIAL_MSG_WAIT			3000	// <500 causes issues?
+#define INITIAL_FUEL_GAUGE_WAIT		1000	// <500 causes issues?
+#define INITIAL_MSG_WAIT			1000	// <500 causes issues?
 #define INITIAL_SETTLING_WAIT		1000	// <500 causes issues?
 
 //#define LOG_INTERVAL				10*1000		// ms between sleep/wake
@@ -645,6 +645,10 @@ APP_TIMER_DEF(plantower_startup_timer);
 APP_TIMER_DEF(specCO_startup_timer);
 APP_TIMER_DEF(figCO2_startup_timer);
 APP_TIMER_DEF(start_adjustment_timer);
+static uint32_t plantower_startup_wait_ms = PLANTOWER_STARTUP_WAIT_TIME;
+static uint32_t specCO_startup_wait_ms = SPEC_CO_STARTUP_WAIT_TIME;
+static uint32_t figaroCO2_startup_wait_ms = FIGARO_CO2_STARTUP_WAIT_TIME;
+
 
 //APP_TIMER_DEF(m_our_char_timer_id);
 
@@ -766,6 +770,9 @@ static ble_gap_addr_t ble_gap_address;
 #define BLE_UUID_AMBIENT_CH0_CHARACTERISTIC		0x0028 // The Firmware Version
 #define BLE_UUID_AMBIENT_CH1_CHARACTERISTIC		0x0029 // The Firmware Version
 #define BLE_UUID_UVA_CHARACTERISTIC				0x002A // The Firmware Version
+#define BLE_UUID_PLANTOWER_WAIT_CHARACTERISTIC	0x002B // The Firmware Version
+#define BLE_UUID_SPEC_CO_WAIT_CHARACTERISTIC	0x002C // The Firmware Version
+#define BLE_UUID_FIGARO_CO2_WAIT_CHARACTERISTIC	0x002D // The Firmware Version
 
 // FW versions
 static char sensen_FW_version[] = 	"SS_v1.00";
@@ -829,6 +836,9 @@ typedef struct
 	ble_gatts_char_handles_t    temp_bme_handles;
 	ble_gatts_char_handles_t    temp_rtc_handles;
 	ble_gatts_char_handles_t    temp_nrf_handles;
+	ble_gatts_char_handles_t    plantower_wait_handles;
+	ble_gatts_char_handles_t    specCO_wait_handles;
+	ble_gatts_char_handles_t    figaroCO2_wait_handles;
 	ble_gatts_char_handles_t    ambient_CH0_handles;
 	ble_gatts_char_handles_t    ambient_CH1_handles;
 	ble_gatts_char_handles_t    uva_handles;
@@ -1624,6 +1634,12 @@ FRESULT sd_values_update() {
 	ff_result = f_write(&file, &on_logging, sizeof(on_logging), (UINT *) &bytes_written);
 	ff_result = f_write(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_written);
 
+#if PRODUCT_TYPE == HAP
+	ff_result = f_write(&file, &plantower_startup_wait_ms,	sizeof(plantower_startup_wait_ms), (UINT *) &bytes_written);
+	ff_result = f_write(&file, &specCO_startup_wait_ms, 	sizeof(specCO_startup_wait_ms), (UINT *) &bytes_written);
+	ff_result = f_write(&file, &figaroCO2_startup_wait_ms, 	sizeof(figaroCO2_startup_wait_ms), (UINT *) &bytes_written);
+#endif
+
     sd_close();
 
 	return ff_result;
@@ -1640,6 +1656,12 @@ FRESULT sd_values_read() {
 //	ff_result = f_read(&file, &is_logging, sizeof(is_logging), (UINT *) &bytes_read);
 	ff_result = f_read(&file, &on_logging, sizeof(on_logging), (UINT *) &bytes_read);
 	ff_result = f_read(&file, &log_interval, sizeof(log_interval), (UINT *) &bytes_read);
+
+#if PRODUCT_TYPE == HAP
+	ff_result = f_read(&file, &plantower_startup_wait_ms, 	sizeof(plantower_startup_wait_ms), (UINT *) &bytes_read);
+	ff_result = f_read(&file, &specCO_startup_wait_ms, 		sizeof(specCO_startup_wait_ms), (UINT *) &bytes_read);
+	ff_result = f_read(&file, &figaroCO2_startup_wait_ms, 	sizeof(figaroCO2_startup_wait_ms), (UINT *) &bytes_read);
+#endif
 
     sd_close();
 
@@ -2120,6 +2142,9 @@ static void services_init(void)
     custom_char_add(&product_service, BLE_UUID_CO2_CHARACTERISTIC, 			&product_service.co2_handles, 		(uint8_t *) &figCO2_value, 			sizeof(figCO2_value),			1,0,	1);
     custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_humidity, 			sizeof(bme_humidity),			1,0,	1);
     custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_temp_C, 			sizeof(bme_temp_C),				1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_PLANTOWER_WAIT_CHARACTERISTIC, 	&product_service.plantower_wait_handles, 	(uint8_t *) &plantower_startup_wait_ms, sizeof(plantower_startup_wait_ms),			1,1,	0);
+    custom_char_add(&product_service, BLE_UUID_SPEC_CO_WAIT_CHARACTERISTIC, 	&product_service.specCO_wait_handles, 		(uint8_t *) &specCO_startup_wait_ms, 	sizeof(specCO_startup_wait_ms),				1,1,	0);
+    custom_char_add(&product_service, BLE_UUID_FIGARO_CO2_WAIT_CHARACTERISTIC, 	&product_service.figaroCO2_wait_handles, 	(uint8_t *) &figaroCO2_startup_wait_ms, sizeof(figaroCO2_startup_wait_ms),			1,1,	0);
 
     // All Services if unspecified
 #else
@@ -2465,21 +2490,35 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 		}
 
 
-//			// TWI (I2C) init
-//		    twi_init();
-//
-//		    struct tm * p_tm;
-//		    p_tm = gmtime(&time_to_be_set);
-//		    set_rtc((uint8_t) p_tm->tm_sec, (uint8_t) p_tm->tm_min, (uint8_t) p_tm->tm_hour, (uint8_t) p_tm->tm_wday + 1, (uint8_t) p_tm->tm_mday, (uint8_t) p_tm->tm_mon + 1, (uint8_t) p_tm->tm_year - 100);
-//
-//			// TWI (I2C) UNinit
-//		    nrf_drv_twi_uninit(&m_twi);
+
+	/**
+	 * HAP Services for changing sensor wait times
+	 */
+
+		// Changing the Plantower startup wait time
+		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->plantower_wait_handles.value_handle) {
+			NRF_LOG_INFO("plantower_startup_wait_ms: %d", plantower_startup_wait_ms);
+	//		restart_measurements();	// Restarted with the updated log_interval value
+			updating_values_file = true;
+
+		// Changing the Spec CO startup wait time
+		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->specCO_wait_handles.value_handle) {
+			NRF_LOG_INFO("specCO_startup_wait_ms: %d", specCO_startup_wait_ms);
+	//		restart_measurements();	// Restarted with the updated log_interval value
+			updating_values_file = true;
+
+		// Changing the Figaro CO2 startup wait time
+		} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->figaroCO2_wait_handles.value_handle) {
+			NRF_LOG_INFO("figaroCO2_startup_wait_ms: %d", figaroCO2_startup_wait_ms);
+	//		restart_measurements();	// Restarted with the updated log_interval value
+			updating_values_file = true;
 
 
 
 	/**
 	 * Sensor Live Stream values using CCCD enables
 	 */
+
 	// Plantower PM2_5
 	} else if(p_ble_evt->evt.gatts_evt.params.write.handle == p_our_service->pm2_5_handles.cccd_handle) {
 		// Get data
@@ -4836,7 +4875,7 @@ void get_data() {
 		NRF_LOG_FLUSH();
 
 		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for figCO2_startup_wait_done..");
+		NRF_LOG_INFO("Waiting for figCO2_startup_wait_done: %d", figaroCO2_startup_wait_ms);
 		while (!figCO2_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
@@ -5103,7 +5142,7 @@ void get_data() {
 		NRF_LOG_INFO("Testing Small Plantower with I2C/TWI...");
 		NRF_LOG_INFO("---------------------------------------");
 		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for plantower_startup_wait_done..");
+		NRF_LOG_INFO("Waiting for plantower_startup_wait_done: %d", plantower_startup_wait_ms);
 		while (!plantower_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
@@ -5176,7 +5215,7 @@ void get_data() {
 		NRF_LOG_INFO("------------------");
 
 		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for specCO_startup_wait_done..");
+		NRF_LOG_INFO("Waiting for specCO_startup_wait_done: %d", specCO_startup_wait_ms);
 		while (!specCO_startup_wait_done) {
 //			nrf_delay_ms(1000);
 		}
@@ -5355,17 +5394,17 @@ int test_main() {
 	}
     plantower_startup_wait_done = 0;
 	if (using_component(SMALL_PLANTOWER, components_used)) {
-		err_code = app_timer_start(plantower_startup_timer, APP_TIMER_TICKS(PLANTOWER_STARTUP_WAIT_TIME), NULL);
+		err_code = app_timer_start(plantower_startup_timer, APP_TIMER_TICKS(plantower_startup_wait_ms), NULL);
 		APP_ERROR_CHECK(err_code);
 	}
     specCO_startup_wait_done = 0;
 	if (using_component(SPEC_CO, components_used)) {
-		err_code = app_timer_start(specCO_startup_timer, APP_TIMER_TICKS(SPEC_CO_STARTUP_WAIT_TIME), NULL);
+		err_code = app_timer_start(specCO_startup_timer, APP_TIMER_TICKS(specCO_startup_wait_ms), NULL);
 		APP_ERROR_CHECK(err_code);
 	}
     figCO2_startup_wait_done = 0;
 	if (using_component(FIGARO_CO2, components_used)) {
-		err_code = app_timer_start(figCO2_startup_timer, APP_TIMER_TICKS(FIGARO_CO2_STARTUP_WAIT_TIME), NULL);
+		err_code = app_timer_start(figCO2_startup_timer, APP_TIMER_TICKS(figaroCO2_startup_wait_ms), NULL);
 		APP_ERROR_CHECK(err_code);
 	}
     hpm_startup_wait_done = 0;
@@ -5807,7 +5846,7 @@ int main(void) {
 	NRF_LOG_INFO("on_logging = %d", on_logging);
 	NRF_LOG_INFO("log_interval = %d", log_interval);
 	NRF_LOG_INFO("WDT_TIMEOUT_MEAS: %d", WDT_TIMEOUT_MEAS);
-	NRF_LOG_DEBUG("PLANTOWER_STARTUP_WAIT_TIME = %d", PLANTOWER_STARTUP_WAIT_TIME);
+	NRF_LOG_DEBUG("plantower_startup_wait_ms = %d", plantower_startup_wait_ms);
 	NRF_LOG_DEBUG("SPEC_CO_STARTUP_WAIT_TIME = %d", SPEC_CO_STARTUP_WAIT_TIME);
 	NRF_LOG_DEBUG("FUEL_PERCENT_THRESHOLD = %d", FUEL_PERCENT_THRESHOLD);
 	NRF_LOG_DEBUG("DEVICE_NAME = %s", DEVICE_NAME);
