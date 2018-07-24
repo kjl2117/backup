@@ -131,7 +131,7 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	BATTERY_TEST	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
@@ -141,9 +141,9 @@ static bool on_logging = true;	// true;	false;	Start with logging on or off (Als
 static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+#define PLANTOWER_STARTUP_WAIT_TIME		15*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 //#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
-#define SPEC_CO_STARTUP_WAIT_TIME		12*1000	//ms,	Response time < 30s (15s typical)
+#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
 //#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
 //#define SPEC_CO_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
@@ -272,7 +272,7 @@ typedef enum {
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_1200mAh;	//BAT_LIPO_1200mAh;
-	static uint16_t min_battery_level = 0;	// units: percent*1000
+	static uint16_t min_battery_level = 0;	//MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "BATT_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR		"BATTERY_TEST"
 	static char product_FW_version[] = 		"BATTERY_TEST_v1.00";
@@ -1748,8 +1748,8 @@ void save_data(void) {
 	#else
 //		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 //		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -3729,6 +3729,12 @@ static ret_code_t set_rtc(uint8_t sec, uint8_t min, uint8_t hour, uint8_t wday, 
 
 	uint8_t rtcbuff[8];
 
+	// Check that we are not over 23:59
+	if (hour > 23) {
+		NRF_LOG_WARNING("** WARNING: hour too big, adjusting to a lower value: %d", hour);
+		hour = 23;
+	}
+
 	// setup buffer to overwrite registers
 	rtcbuff[0] = 0x00;	// register address for Seconds
 	rtcbuff[1] = dec_to_bcd(sec);
@@ -4704,7 +4710,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 31, 14 +4, 	3, 26, 6, 18);	// about 11 seconds of delay
+			set_rtc(00, 52, 22 +4, 	6, 20, 7, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -6011,6 +6017,9 @@ int main(void) {
 //			done_sending_sdc = false;
 			send_sdc_packets();
         }
+
+        // Feed WDT before sleeping again, otherwise it will still reset in ~3.5 days
+        nrf_drv_wdt_feed();
     }
 
 }
