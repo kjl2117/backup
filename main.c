@@ -131,7 +131,7 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	BATTERY_TEST	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
@@ -4743,9 +4743,34 @@ void get_data() {
 			rtc_error_cnt_total++;
 		}
 
+
+
 		if (t0 == 0) {	// Record initial time
 			t0 = time_now;
 		}
+
+		// If nRF clock and RTC are unsynced, correct it
+		if (!adjusting_timer_start && !is_live_streaming) {
+			uint32_t timer_offset_s = time_now % (log_interval/1000);
+			if (timer_offset_s != 0) {
+				uint32_t ms_to_next_meas = log_interval - timer_offset_s*1000 - INITIAL_SETTLING_WAIT;
+
+				// Correct if the wait is too short (maybe RTC was slower)
+				if (ms_to_next_meas < log_interval/2) {
+					ms_to_next_meas += log_interval;
+					skipping_next_meas_loop = true;
+				}
+
+				err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(ms_to_next_meas*1000), NULL);
+				if (err_code) {
+					NRF_LOG_WARNING("** WARNING: %d, app_timer_start(ms_to_next_meas)", err_code);
+				}
+
+				// Adjust current time so it lines up with the others
+				time_now += (ms_to_next_meas - log_interval)/1000;
+			}
+		}
+
 
 		// Try to make all of the measurement timers sync'ed to start at predictable times (e.g. 4:05, 4:10, 4:15, etc)
 		if (adjusting_timer_start) {
@@ -4760,7 +4785,7 @@ void get_data() {
 		    start_adjustment_wait_done = false;
 			err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(time_to_wait_s*1000), NULL);
 			if (err_code) {
-				NRF_LOG_WARNING("** WARNING: %d, app_timer_start(start_adjustment_timer)", err_code);
+				NRF_LOG_WARNING("** WARNING: %d, app_timer_start(time_to_wait_s)", err_code);
 			}
 //			APP_ERROR_CHECK(err_code);
 		}
