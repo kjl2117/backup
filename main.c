@@ -4710,7 +4710,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 52, 22 +4, 	6, 20, 7, 18);	// about 11 seconds of delay
+			set_rtc(00, 34, 17 +4, 	6, 27, 7, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -4749,6 +4749,9 @@ void get_data() {
 			t0 = time_now;
 		}
 
+
+		NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
+
 		// If nRF clock and RTC are unsynced, correct it
 		if (!adjusting_timer_start && !is_live_streaming) {
 			uint32_t timer_offset_s = time_now % (log_interval/1000);
@@ -4766,8 +4769,12 @@ void get_data() {
 					NRF_LOG_WARNING("** WARNING: %d, app_timer_start(ms_to_next_meas)", err_code);
 				}
 
+				NRF_LOG_DEBUG("time_now: %d", time_now);
+				NRF_LOG_DEBUG("ms_to_next_meas: %d", ms_to_next_meas);
+
+
 				// Adjust current time so it lines up with the others
-				time_now += (ms_to_next_meas - log_interval)/1000;
+				time_now += (ms_to_next_meas - log_interval + INITIAL_SETTLING_WAIT)/1000;
 			}
 		}
 
