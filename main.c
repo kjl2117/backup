@@ -138,14 +138,12 @@ static void stop_measurements();
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
 static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
-static uint32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
-//#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define PLANTOWER_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
+//#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
-//#define SPEC_CO_STARTUP_WAIT_TIME		30*1000	//ms,	Response time < 30s (15s typical)
-//#define SPEC_CO_STARTUP_WAIT_TIME		3*1000	//3*1000	//ms
+//#define SPEC_CO_STARTUP_WAIT_TIME		10*1000	//ms,	Response time < 30s (15s typical)
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
@@ -4752,11 +4750,14 @@ void get_data() {
 
 		NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
 
+//		// FOR TESTING, REMOVE LATER
+//		adjusting_timer_start = 0;
+
 		// If nRF clock and RTC are unsynced, correct it
 		if (!adjusting_timer_start && !is_live_streaming) {
 			uint32_t timer_offset_s = time_now % (log_interval/1000);
 			if (timer_offset_s != 0) {
-				uint32_t ms_to_next_meas = log_interval - timer_offset_s*1000 - INITIAL_SETTLING_WAIT;
+				int32_t ms_to_next_meas = log_interval - timer_offset_s*1000 - INITIAL_SETTLING_WAIT;
 
 				// Correct if the wait is too short (maybe RTC was slower)
 				if (ms_to_next_meas < log_interval/2) {
@@ -4771,10 +4772,19 @@ void get_data() {
 
 				NRF_LOG_DEBUG("time_now: %d", time_now);
 				NRF_LOG_DEBUG("ms_to_next_meas: %d", ms_to_next_meas);
+				NRF_LOG_DEBUG("log_interval: %d", log_interval);
+				NRF_LOG_DEBUG("INITIAL_SETTLING_WAIT: %d", INITIAL_SETTLING_WAIT);
+				NRF_LOG_DEBUG("ms_to_next_meas - log_interval: %d", ms_to_next_meas - log_interval);
+				NRF_LOG_DEBUG("(ms_to_next_meas - log_interval)/1000: %d", (ms_to_next_meas - log_interval)/1000);
+//				NRF_LOG_DEBUG("test math: %d", (146*1000 - 300*1000)/1000);
+				int32_t amount_to_adjust = (ms_to_next_meas - log_interval + INITIAL_SETTLING_WAIT)/1000;
+				NRF_LOG_DEBUG("amount_to_adjust: %d", amount_to_adjust);
 
 
 				// Adjust current time so it lines up with the others
-				time_now += (ms_to_next_meas - log_interval + INITIAL_SETTLING_WAIT)/1000;
+//				time_now += (ms_to_next_meas - log_interval + INITIAL_SETTLING_WAIT)/1000;
+				time_now += amount_to_adjust;
+
 			}
 		}
 
