@@ -4770,7 +4770,7 @@ void get_data() {
 				}
 
 			    start_adjustment_wait_done = false;
-				err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(ms_to_next_meas*1000), NULL);
+				err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(ms_to_next_meas), NULL);
 				if (err_code) {
 					NRF_LOG_WARNING("** WARNING: %d, app_timer_start(ms_to_next_meas)", err_code);
 				}
