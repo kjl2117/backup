@@ -141,9 +141,9 @@ static bool on_logging = false;	// true;	false;	Start with logging on or off (Al
 static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 #define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define PLANTOWER_STARTUP_WAIT_TIME		10*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		5*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
-//#define SPEC_CO_STARTUP_WAIT_TIME		10*1000	//ms,	Response time < 30s (15s typical)
+//#define SPEC_CO_STARTUP_WAIT_TIME		5*1000	//ms,	Response time < 30s (15s typical)
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
@@ -4750,8 +4750,9 @@ void get_data() {
 
 		NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
 
-//		// FOR TESTING, REMOVE LATER
+//////		// FOR TESTING, REMOVE LATER
 //		adjusting_timer_start = 0;
+//		time_now = 1533076231;	//1533076200
 
 		// If nRF clock and RTC are unsynced, correct it
 		if (!adjusting_timer_start && !is_live_streaming) {
@@ -4763,8 +4764,12 @@ void get_data() {
 				if (ms_to_next_meas < log_interval/2) {
 					ms_to_next_meas += log_interval;
 					skipping_next_meas_loop = true;
+					NRF_LOG_INFO("skipping_next_meas_loop: %d", skipping_next_meas_loop);
+				} else {
+
 				}
 
+			    start_adjustment_wait_done = false;
 				err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(ms_to_next_meas*1000), NULL);
 				if (err_code) {
 					NRF_LOG_WARNING("** WARNING: %d, app_timer_start(ms_to_next_meas)", err_code);
@@ -5714,6 +5719,7 @@ static void test_all()
 // Timeout handlers for startup waits with the single shot timers
 static void meas_loop_handler(void * p_context) {
 	if (skipping_next_meas_loop) {
+		NRF_LOG_INFO("Skipped the coming meas_loop: %d", skipping_next_meas_loop);
 		meas_loop_wait_done = false;
 		skipping_next_meas_loop = false;
 	} else {
@@ -5998,16 +6004,16 @@ int main(void) {
     {
         UNUSED_RETURN_VALUE(NRF_LOG_PROCESS());
         power_manage();
-        if (meas_loop_wait_done) {
-        	test_all();
-        }
-        // Restart the measurement timer so that the start times are sync'ed
+        // Restart the measurement timer so that the start times are sync'ed.  NOTE: needs to happen before checking meas_loop_wait_done b/c it can sleep after setting the flag
         if (start_adjustment_wait_done) {
 //        	stop_measurements();
         	restart_measurements();
         	start_adjustment_wait_done = false;
         	adjusting_timer_start = false;	// reset flag
 			NRF_LOG_DEBUG("adjusting_timer_start: %d", adjusting_timer_start);
+        }
+        if (meas_loop_wait_done) {
+        	test_all();
         }
 //        if (updating_end_byte) {
 //			// Start the SD card
