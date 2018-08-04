@@ -131,14 +131,14 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	TEMP_MONITOR	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
-#define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
+#define RESET_VALUES_FILE			1	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
-static int32_t log_interval = 5*1000;	//60*1000;	// units: ms
+static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
+static int32_t log_interval = 30*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -175,6 +175,8 @@ static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
 #define DHT_STARTUP_WAIT_TIME			2*1000	//ms, Collecting period should be : >2 second.
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 #define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
+#define DHT_PIN		14	//16		///< 	P0.16 DHT pin
+#define DHT_PIN_2	11	// Additional DHT pins
 
 
 // The different sensors (used for choosing which sensor code to run)
@@ -230,10 +232,11 @@ typedef enum {
 	static char product_FW_version[] = 		"SUM_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = 2*UVA_VEML_MEAS_DELAY;
+	static uint8_t dht_pins[] = {	DHT_PIN	};
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
-//		ADP,		// DIG
-//		ADP_HIGH,	// DIG, for switching only High Power sensors
+		ADP,		// DIG
+		ADP_HIGH,	// DIG, for switching only High Power sensors
 		SDC,		// SD card, SPIO
 		BATTERY,	// AIN(no pin),	3279
 		FUEL_GAUGE,	// I2C
@@ -252,6 +255,7 @@ typedef enum {
 	static char product_FW_version[] = 		"HAP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+	static uint8_t dht_pins[] = {	DHT_PIN	};
 #elif PRODUCT_TYPE == TEMP_MONITOR
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -266,13 +270,14 @@ typedef enum {
 		UVA_VEML		// I2C
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
-	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	static battery_type battery_type_used = BAT_LIPO_2000mAh;
 	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
 	#define DEVICE_NAME                     "TEMP_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
 	#define PRODUCT_STR						"TEMP"
 	static char product_FW_version[] = 		"TEMP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = 2*DHT_STARTUP_WAIT_TIME;
+	static uint8_t dht_pins[] = {	DHT_PIN,	DHT_PIN_2	};
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
 //		ADP,		// DIG
@@ -297,6 +302,7 @@ typedef enum {
 	static char product_FW_version[] = 		"BATTERY_TEST_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+	static uint8_t dht_pins[] = {	DHT_PIN	};
 #elif PRODUCT_TYPE == WAIT_TIME_TEST
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -321,6 +327,7 @@ typedef enum {
 	static char product_FW_version[] = 		"WAIT_TIME_TEST_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+	static uint8_t dht_pins[] = {	DHT_PIN	};
 #else
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -347,6 +354,7 @@ typedef enum {
 	static char product_FW_version[] = 		"CUSTOM_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+	static uint8_t dht_pins[] = {	DHT_PIN	};
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
@@ -392,6 +400,9 @@ static ret_code_t err_code;
 #elif PRODUCT_TYPE == HAP
 	#define FILE_HEADER			"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent\r\n"
 	#define FILE_HEADER_EXTRA	"Time, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+#elif PRODUCT_TYPE == TEMP_MONITOR
+	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
 #else
 	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
 	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
@@ -489,7 +500,9 @@ static int32_t temp_nrf = 0;	// units: degC*100, precision +/- 0.25C
 
 
 /** DHT Variables **/
+static uint8_t dht_num = sizeof(dht_pins)/sizeof(dht_pins[0]);
 static int dht_temp_C = 0;
+//static int dht_temp_C[dht_num] = {0};
 static int dht_humidity = 0;
 #define DHT_RETRY_NUM	5
 
@@ -674,7 +687,7 @@ static uint32_t figaroCO2_startup_wait_ms = FIGARO_CO2_STARTUP_WAIT_TIME;
 #define TWI_SCL_PIN			27		///< 	P0.27 SCL pin.
 #define TWI_SDA_PIN			26		///< 	P0.26 SDA pin.
 
-#define DHT_PIN				16		///< 	P0.16 DHT pin
+//#define DHT_PIN				14	//16		///< 	P0.16 DHT pin
 #define ADC_PIN				NRF_SAADC_INPUT_AIN0		///< 	P0.02 AIN0 pin.
 #define GPIO_TEST_PIN		23		///< 	P0.23 random pin for testing
 
@@ -4728,7 +4741,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 29, 17 +4, 	6, 3, 8, 18);	// about 11 seconds of delay
+			set_rtc(00, 5, 16 +4, 	7, 4, 8, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -4878,36 +4891,49 @@ void get_data() {
 		NRF_LOG_INFO("");
 		NRF_LOG_INFO("Testing DHT...");
 		NRF_LOG_INFO("--------------");
-		dht_init(DHT_PIN);
+//		dht_init(DHT_PIN);
+		dht_init();
 
 		// Wait for sensor to settle from when ADP turned on
+		NRF_LOG_INFO("Waiting for dht_startup_wait_done: %d", DHT_STARTUP_WAIT_TIME);
 		while (!dht_startup_wait_done) {}
+		NRF_LOG_DEBUG("--DHT WAIT DONE");
 
 
-		err_code = DHTLIB_ERROR_TIMEOUT;
-		for (int i=0; (err_code == DHTLIB_ERROR_TIMEOUT) && (i < DHT_RETRY_NUM); i++) {
-			NRF_LOG_DEBUG("Start DHT read..");
-			err_code = dht_read();
-			if (err_code == DHTLIB_ERROR_TIMEOUT) {
-				NRF_LOG_INFO("* RETRY: DHT TIMEOUT ERROR, err_code=%d *", err_code);
-				avoided_error_cnt++;
+		// Read each DHT pin that we have connected
+		for (uint8_t i = 0; i < dht_num; i++) {
+			NRF_LOG_INFO("-Reading DHT pin: %d", dht_pins[i]);
+
+			err_code = DHTLIB_ERROR_TIMEOUT;
+			for (int i=0; (err_code == DHTLIB_ERROR_TIMEOUT) && (i < DHT_RETRY_NUM); i++) {
+	//			err_code = dht_read();
+//				err_code = dht_read(DHT_PIN);
+				err_code = dht_read(dht_pins[i]);
+				if (err_code == DHTLIB_ERROR_TIMEOUT) {
+					NRF_LOG_INFO("* RETRY: DHT TIMEOUT ERROR, err_code=%d *", err_code);
+					avoided_error_cnt++;
+				}
+				nrf_delay_ms(500);
 			}
-			nrf_delay_ms(500);
+			if (err_code) {
+				NRF_LOG_ERROR("** ERROR: DHT read, err_code=%d **", err_code);
+				dht_temp_C = 0;
+				dht_humidity = 0;
+				err_cnt++;
+				dht_error_cnt_total++;
+			} else {
+	//			NRF_LOG_DEBUG("SUCCESS: DHT READ");
+				dht_temp_C = dht_getCelsius();
+				dht_humidity = dht_getHumidity();
+			}
+			NRF_LOG_INFO("dht_temp_C: %d", dht_temp_C);
+			NRF_LOG_INFO("dht_temp_F: %d", dht_getFahrenheit());
+			NRF_LOG_INFO("dht_humidity: %d", dht_humidity);
 		}
-		if (err_code) {
-			NRF_LOG_ERROR("** ERROR: DHT read, err_code=%d **", err_code);
-			dht_temp_C = 0;
-			dht_humidity = 0;
-			err_cnt++;
-			dht_error_cnt_total++;
-		} else {
-			NRF_LOG_DEBUG("SUCCESS: DHT READ");
-			dht_temp_C = dht_getCelsius();
-			dht_humidity = dht_getHumidity();
-		}
-		NRF_LOG_INFO("dht_temp_C: %d", dht_temp_C);
-		NRF_LOG_INFO("dht_temp_F: %d", dht_getFahrenheit());
-		NRF_LOG_INFO("dht_humidity: %d", dht_humidity);
+
+
+
+
 		dht_uninit();
 	}
 

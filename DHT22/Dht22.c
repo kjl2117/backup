@@ -14,7 +14,7 @@ static int dht_humidity;
 static int dht_temperature;
 /// pin to read the sensor info on
 //DigitalInOut _pin;
-static uint8_t dht_pin;
+//static uint8_t dht_pin;
 /// times startup (must settle for at least a second)
 #define DHT_STARTUP_SETTLING_TIME	2000	// ms
 /** Timer variables **/
@@ -29,7 +29,8 @@ void dht_timer_handler(nrf_timer_event_t event_type, void * p_context)
 }
 
 
-void dht_init(uint8_t pin_num) {
+//void dht_init(uint8_t pin_num) {
+void dht_init() {
     // Set creation time so we can make
     // sure we pause at least 1 second for
     // startup.
@@ -37,15 +38,15 @@ void dht_init(uint8_t pin_num) {
 
     dht_temperature = 0;
     dht_humidity = 0;
-    dht_pin = pin_num;
-	NRF_LOG_INFO("--T1");
+//    dht_pin = pin_num;
+//	NRF_LOG_INFO("--T1");
 
     // For Timer
     ret_code_t err_code;
     nrf_drv_timer_config_t timer_cfg = NRF_DRV_TIMER_DEFAULT_CONFIG;
     timer_cfg.bit_width = NRF_TIMER_BIT_WIDTH_32;
     err_code = nrf_drv_timer_init(&m_timer, &timer_cfg, dht_timer_handler);
-	NRF_LOG_INFO("--T2");
+//	NRF_LOG_INFO("--T2");
     APP_ERROR_CHECK(err_code);
 //    nrf_drv_timer_enable(&m_timer);
 
@@ -60,7 +61,8 @@ void dht_uninit() {
 //void dht_timeout_handler(void * p_context);	// blank function to use as an argument
 
 
-int dht_read() {
+//int dht_read() {
+int dht_read(uint8_t dht_pin) {
 
 //    // NRF_LOG setup
 //    APP_ERROR_CHECK(NRF_LOG_INIT(NULL));

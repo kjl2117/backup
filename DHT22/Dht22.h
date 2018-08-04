@@ -14,7 +14,8 @@
  *
  * @param pin PinName for the sensor pin.
  */
-void dht_init(uint8_t dht_pin);
+//void dht_init(uint8_t dht_pin);
+void dht_init();
 
 /** Release the sensor object (mostly to uninit timer)
  *
@@ -26,7 +27,8 @@ void dht_uninit();
  * @returns
  *   0 on success, otherwise error.
  */
-int dht_read();
+//int dht_read();
+int dht_read(uint8_t dht_pin);
 
 /** Get the temp(f) from the saved object.
  *
