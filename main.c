@@ -265,6 +265,7 @@ typedef enum {
 		TEMP_NRF,	// REGISTER
 		RTC,		// I2C
 			DHT,	// 1-wire
+			BME,	// I2C
 	//////				UV_SI1145,		// I2C
 		AMBIENT_LTR,	// I2C
 		UVA_VEML		// I2C
@@ -395,17 +396,17 @@ static ret_code_t err_code;
 /** SD Card Variables.  From example: peripheral/fatfs **/
 #define MAX_OUT_STR_SIZE	200
 #if PRODUCT_TYPE == SUM
-	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent\r\n"
-	#define FILE_HEADER_EXTRA	"Time, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+	#define FILE_HEADER			"Time,rtc_temp,ambient_CH0,ambient_CH1,uva_value,fuel_v_cell,fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time,temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
 #elif PRODUCT_TYPE == HAP
-	#define FILE_HEADER			"Time, specCO, figaroCO2, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent\r\n"
-	#define FILE_HEADER_EXTRA	"Time, bme_pressure, rtc_temp, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+	#define FILE_HEADER			"Time,specCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,fuel_v_cell,fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time,bme_pressure,rtc_temp,temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
 #elif PRODUCT_TYPE == TEMP_MONITOR
-	#define FILE_HEADER			"Time, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent\r\n"
-	#define FILE_HEADER_EXTRA	"Time, temp_nrf, battery_value, fuel_percent, fuel_percent_raw, err_cnt\r\n"
+	#define FILE_HEADER			"Time,rtc_temp,dht_temp_C[0],dht_temp_C[1],dht_humidity[0],dht_humidity[1],ambient_CH0,ambient_CH1,uva_value,fuel_v_cell,fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time,temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
 #else
-	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
-	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp,temp_nrf, ambient_CH0, ambient_CH1, uva_value, battery_value, fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total\r\n"
+	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,bme_pressure,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
+	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,bme_pressure,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
 #endif
 static bool testing_sensors = false;	// Run through all sensors once in the beginning to check (but don't save to SDC)
 
@@ -500,10 +501,11 @@ static int32_t temp_nrf = 0;	// units: degC*100, precision +/- 0.25C
 
 
 /** DHT Variables **/
-static uint8_t dht_num = sizeof(dht_pins)/sizeof(dht_pins[0]);
-static int dht_temp_C = 0;
-//static int dht_temp_C[dht_num] = {0};
-static int dht_humidity = 0;
+//static uint8_t dht_num = sizeof(dht_pins)/sizeof(dht_pins[0]);
+#define dht_num 	sizeof(dht_pins)/sizeof(dht_pins[0])
+//static int dht_temp_C = 0;
+static int dht_temp_C[dht_num] = {0};
+static int dht_humidity[dht_num] = {0};
 #define DHT_RETRY_NUM	5
 
 /** Timer variables **/
@@ -1776,6 +1778,9 @@ void save_data(void) {
 	#elif PRODUCT_TYPE == HAP
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
+	#elif PRODUCT_TYPE == TEMP_MONITOR
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, dht_temp_C[0], dht_temp_C[1], dht_humidity[0], dht_humidity[1], ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent);
+		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#else
 //		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 //		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
@@ -4917,18 +4922,18 @@ void get_data() {
 			}
 			if (err_code) {
 				NRF_LOG_ERROR("** ERROR: DHT read, err_code=%d **", err_code);
-				dht_temp_C = 0;
-				dht_humidity = 0;
+				dht_temp_C[i] = 0;
+				dht_humidity[i] = 0;
 				err_cnt++;
 				dht_error_cnt_total++;
 			} else {
 	//			NRF_LOG_DEBUG("SUCCESS: DHT READ");
-				dht_temp_C = dht_getCelsius();
-				dht_humidity = dht_getHumidity();
+				dht_temp_C[i] = dht_getCelsius();
+				dht_humidity[i] = dht_getHumidity();
 			}
-			NRF_LOG_INFO("dht_temp_C: %d", dht_temp_C);
-			NRF_LOG_INFO("dht_temp_F: %d", dht_getFahrenheit());
-			NRF_LOG_INFO("dht_humidity: %d", dht_humidity);
+			NRF_LOG_INFO("dht_temp_C[%d]: %d", i, dht_temp_C[i]);
+			NRF_LOG_INFO("dht_temp_F[%d]: %d", i, dht_getFahrenheit());
+			NRF_LOG_INFO("dht_humidity[%d]: %d", i, dht_humidity[i]);
 		}
 
 
