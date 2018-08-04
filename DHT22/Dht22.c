@@ -19,7 +19,7 @@ static uint8_t dht_pin;
 #define DHT_STARTUP_SETTLING_TIME	2000	// ms
 /** Timer variables **/
 #define TIMER_CHANNEL_NUM	NRF_TIMER_CC_CHANNEL0
-#define TIMER_NUM			0	// Which Timer to use: TIMER0 reserved for SoftDevice, maybe change sdk_config.h
+#define TIMER_NUM			1	// Which Timer to use: TIMER0 reserved for SoftDevice, maybe change sdk_config.h
 static const nrf_drv_timer_t m_timer = NRF_DRV_TIMER_INSTANCE(TIMER_NUM);
 
 // Dummy function for argument, Taken from peripheral/saadc
@@ -38,12 +38,14 @@ void dht_init(uint8_t pin_num) {
     dht_temperature = 0;
     dht_humidity = 0;
     dht_pin = pin_num;
+	NRF_LOG_INFO("--T1");
 
     // For Timer
     ret_code_t err_code;
     nrf_drv_timer_config_t timer_cfg = NRF_DRV_TIMER_DEFAULT_CONFIG;
     timer_cfg.bit_width = NRF_TIMER_BIT_WIDTH_32;
     err_code = nrf_drv_timer_init(&m_timer, &timer_cfg, dht_timer_handler);
+	NRF_LOG_INFO("--T2");
     APP_ERROR_CHECK(err_code);
 //    nrf_drv_timer_enable(&m_timer);
 

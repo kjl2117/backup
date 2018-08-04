@@ -123,32 +123,32 @@ static void stop_measurements();
 #define HAP				1
 #define BATTERY_TEST	2
 #define WAIT_TIME_TEST	3
-#define CUSTOM			4
-
+#define TEMP_MONITOR	4
+#define CUSTOM			5
 
 
 /** GLOBAL VARIABLES **/
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
 static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
-static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static int32_t log_interval = 5*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
-#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define PLANTOWER_STARTUP_WAIT_TIME		5*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
-//#define SPEC_CO_STARTUP_WAIT_TIME		5*1000	//ms,	Response time < 30s (15s typical)
+//#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+#define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
+#define SPEC_CO_STARTUP_WAIT_TIME		0.1*1000	//ms,	Response time < 30s (15s typical)
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
-#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
-//#define FIGARO_CO2_STARTUP_WAIT_TIME	3*1000	// 2*1000 is too small, only reading value==360
+//#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+#define FIGARO_CO2_STARTUP_WAIT_TIME	0.1*1000	// 2*1000 is too small, only reading value==360
 #define FUEL_GAUGE_RCOMP	0x97	// Config value to adjust for Custom batteries
 
 #define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
@@ -172,7 +172,7 @@ static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
 #define LOG_FILE_NAME   "datalog.txt"
 static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
 
-#define DHT_STARTUP_WAIT_TIME			0.1*1000	//ms
+#define DHT_STARTUP_WAIT_TIME			2*1000	//ms, Collecting period should be : >2 second.
 #define HPM_STARTUP_WAIT_TIME			6*1000	//ms,	6s (10-15s recommended) for Honeywell; 10s for Plantower
 #define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
 
@@ -232,8 +232,8 @@ typedef enum {
 	static uint32_t max_sensor_wait_ms = 2*UVA_VEML_MEAS_DELAY;
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
-		ADP,		// DIG
-		ADP_HIGH,	// DIG, for switching only High Power sensors
+//		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
 		SDC,		// SD card, SPIO
 		BATTERY,	// AIN(no pin),	3279
 		FUEL_GAUGE,	// I2C
@@ -252,6 +252,27 @@ typedef enum {
 	static char product_FW_version[] = 		"HAP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
+#elif PRODUCT_TYPE == TEMP_MONITOR
+	static component_type components_used[] = {
+		ADP,		// DIG
+		SDC,		// SD card, SPIO
+		BATTERY,	// AIN(no pin),	3279
+		FUEL_GAUGE,	// I2C
+		TEMP_NRF,	// REGISTER
+		RTC,		// I2C
+			DHT,	// 1-wire
+	//////				UV_SI1145,		// I2C
+		AMBIENT_LTR,	// I2C
+		UVA_VEML		// I2C
+	};
+	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
+	static battery_type battery_type_used = BAT_LIPO_1200mAh;
+	static uint16_t min_battery_level = MIN_BATTERY_LEVEL;	// units: percent*1000
+	#define DEVICE_NAME                     "TEMP_SENSEN"                               /**< Name of device. Will be included in the advertising data. */
+	#define PRODUCT_STR						"TEMP"
+	static char product_FW_version[] = 		"TEMP_v1.00";
+	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
+	static uint32_t max_sensor_wait_ms = 2*DHT_STARTUP_WAIT_TIME;
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
 //		ADP,		// DIG
@@ -519,13 +540,12 @@ static nrf_saadc_value_t figCO_value;
 static nrf_saadc_value_t battery_value;
 
 /** Fuel Gauge Check Variables (TWI) **/
-#if PRODUCT_TYPE == SUM
+#if PRODUCT_TYPE == SUM \
+	|| PRODUCT_TYPE == TEMP_MONITOR
 	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
-#elif PRODUCT_TYPE == HAP
-	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
-#elif PRODUCT_TYPE == BATTERY_TEST
-	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
-#elif PRODUCT_TYPE == WAIT_TIME_TEST
+#elif PRODUCT_TYPE == HAP \
+	|| PRODUCT_TYPE == BATTERY_TEST \
+	|| PRODUCT_TYPE == WAIT_TIME_TEST
 	const int fuel_addr = 0x32;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
 #else
 //	const int fuel_addr = 0x36;	//0x32;	// 0x36; // 8bit I2C address, 0x68 for RTC
@@ -4708,7 +4728,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 34, 17 +4, 	6, 27, 7, 18);	// about 11 seconds of delay
+			set_rtc(00, 29, 17 +4, 	6, 3, 8, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -5991,6 +6011,13 @@ int main(void) {
 		testing_sensors = true;
     	test_all();
 		testing_sensors = false;
+
+		// Make sure ADP's are off (e.g. Justin's custom one)
+		nrf_gpio_cfg_output(ADP1_PIN);
+		nrf_gpio_pin_clear(ADP1_PIN);		// Enable HIGH
+		nrf_gpio_cfg_output(ADP2_PIN);
+		nrf_gpio_pin_clear(ADP2_PIN);		// Enable HIGH
+
 	}
 
     // Let the user read the startup messages
