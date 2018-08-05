@@ -177,6 +177,7 @@ static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
 #define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
 #define DHT_PIN		14	//16		///< 	P0.16 DHT pin
 #define DHT_PIN_2	11	// Additional DHT pins
+#define DHT_PIN_3	12	// Additional DHT pins
 
 
 // The different sensors (used for choosing which sensor code to run)
@@ -233,6 +234,7 @@ typedef enum {
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = 2*UVA_VEML_MEAS_DELAY;
 	static uint8_t dht_pins[] = {	DHT_PIN	};
+	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -256,6 +258,7 @@ typedef enum {
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 	static uint8_t dht_pins[] = {	DHT_PIN	};
+	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == TEMP_MONITOR
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -278,7 +281,8 @@ typedef enum {
 	static char product_FW_version[] = 		"TEMP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = 2*DHT_STARTUP_WAIT_TIME;
-	static uint8_t dht_pins[] = {	DHT_PIN,	DHT_PIN_2	};
+	static uint8_t dht_pins[] = {	DHT_PIN,	DHT_PIN_2,	DHT_PIN_3	};
+	const uint8_t bme_addresses[] = {	0x76,	0x77	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
 //		ADP,		// DIG
@@ -304,6 +308,7 @@ typedef enum {
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 	static uint8_t dht_pins[] = {	DHT_PIN	};
+	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == WAIT_TIME_TEST
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -329,6 +334,7 @@ typedef enum {
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 	static uint8_t dht_pins[] = {	DHT_PIN	};
+	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #else
 	static component_type components_used[] = {
 		ADP,		// DIG
@@ -356,6 +362,7 @@ typedef enum {
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
 	static uint8_t dht_pins[] = {	DHT_PIN	};
+	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #endif
 
 // NOTE: This MUST correspond to battery_type above!
@@ -402,11 +409,11 @@ static ret_code_t err_code;
 	#define FILE_HEADER			"Time,specCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,fuel_v_cell,fuel_percent\r\n"
 	#define FILE_HEADER_EXTRA	"Time,bme_pressure,rtc_temp,temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
 #elif PRODUCT_TYPE == TEMP_MONITOR
-	#define FILE_HEADER			"Time,rtc_temp,dht_temp_C[0],dht_temp_C[1],dht_humidity[0],dht_humidity[1],ambient_CH0,ambient_CH1,uva_value,fuel_v_cell,fuel_percent\r\n"
-	#define FILE_HEADER_EXTRA	"Time,temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
+	#define FILE_HEADER			"Time,rtc_temp,dht_temp_C[0],dht_temp_C[1],dht_temp_C[2],dht_humidity[0],dht_humidity[1],dht_humidity[2],bme_temp_C[0],bme_temp_C[1],bme_humidity[0],bme_humidity[1],ambient_CH0,ambient_CH1,uva_value,fuel_v_cell,fuel_percent\r\n"
+	#define FILE_HEADER_EXTRA	"Time,bme_pressure[0],bme_pressure[1],temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
 #else
-	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,bme_pressure,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
-	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,bme_pressure,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
+	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_T,bme_H,bme_P,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
+	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_T,bme_H,bme_P,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
 #endif
 static bool testing_sensors = false;	// Run through all sensors once in the beginning to check (but don't save to SDC)
 
@@ -471,10 +478,16 @@ const int figCO2_addr = 0x69; // 8bit I2C address, 0x69 for figaro CO2.  0x68 al
 
 /** BME280 Variables, TWI **/
 #define BME_MEAS_WAIT	10	// ms, need to wait for it to measure, then read
-static int32_t bme_temp_C = 0;	// units: degC*100
-static int32_t bme_humidity = 0;	// units: %RH*1000
-static uint32_t bme_pressure = 0;	// units: Pa
-const int bme_addr = 0x76;	//0x77; // 8bit I2C address, 0x76 or 0x77
+#define BME_NUM 	sizeof(bme_addresses)/sizeof(bme_addresses[0])
+static int32_t bme_T = 0;	// units: degC*100
+static int32_t bme_H = 0;	// units: %RH*1000
+static uint32_t bme_P = 0;	// units: Pa
+static int32_t bme_temp_C[BME_NUM] = {0};	// units: degC*100
+static int32_t bme_humidity[BME_NUM] = {0};	// units: %RH*1000
+static uint32_t bme_pressure[BME_NUM] = {0};	// units: Pa
+//const uint8_t bme_addr = 0x76;	//0x77; // 8bit I2C address, 0x76 or 0x77
+//const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
+//const uint8_t bme_addr_2 = 0x77;	//0x77; // 8bit I2C address, 0x76 or 0x77
 #define BME_BUFF_SIZE	8
 // All of the calibration values
 static int has_read_calib_data = 0;
@@ -501,12 +514,12 @@ static int32_t temp_nrf = 0;	// units: degC*100, precision +/- 0.25C
 
 
 /** DHT Variables **/
-//static uint8_t dht_num = sizeof(dht_pins)/sizeof(dht_pins[0]);
-#define dht_num 	sizeof(dht_pins)/sizeof(dht_pins[0])
+//static uint8_t DHT_NUM = sizeof(dht_pins)/sizeof(dht_pins[0]);
+#define DHT_NUM 	sizeof(dht_pins)/sizeof(dht_pins[0])
 //static int dht_temp_C = 0;
-static int dht_temp_C[dht_num] = {0};
-static int dht_humidity[dht_num] = {0};
-#define DHT_RETRY_NUM	5
+static int dht_temp_C[DHT_NUM] = {0};
+static int dht_humidity[DHT_NUM] = {0};
+#define DHT_RETRY_NUM	3
 
 /** Timer variables **/
 #define TIMER_NUM	0	// Which Timer to use: TIMER0 reserved for SoftDevice, maybe change sdk_config.h
@@ -1296,15 +1309,15 @@ ret_code_t push_live_stream_values()
     if (product_service.rh_handles.is_enabled) {
 //		static int16_t previous_bme_humidity = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
-	    if(bme_humidity != previous_bme_humidity) {
+	    if(bme_H != previous_bme_humidity) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(&product_service, &product_service.rh_handles, &bme_humidity, sizeof(bme_humidity));
+			err_code = custom_characteristic_update(&product_service, &product_service.rh_handles, &bme_H, sizeof(bme_H));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
 				return err_code;
 			} else {
-				previous_bme_humidity = bme_humidity;	// update previous value
+				previous_bme_humidity = bme_H;	// update previous value
 			}
 	    }
     }
@@ -1313,15 +1326,15 @@ ret_code_t push_live_stream_values()
     if (product_service.temp_bme_handles.is_enabled) {
 //		static int16_t previous_bme_temp_C = 0; // Declare a variable to store current temperature until next measurement.
 		// Check if current value is different from last value
-	    if(bme_temp_C != previous_bme_temp_C) {
+	    if(bme_T != previous_bme_temp_C) {
 			// If new value then send notification
-			err_code = custom_characteristic_update(&product_service, &product_service.temp_bme_handles, &bme_temp_C, sizeof(bme_temp_C));
+			err_code = custom_characteristic_update(&product_service, &product_service.temp_bme_handles, &bme_T, sizeof(bme_T));
 			if (err_code != NRF_SUCCESS) {
 				NRF_LOG_WARNING("err_code: %d", err_code);
 				APP_ERROR_CHECK(err_code);
 				return err_code;
 			} else {
-				previous_bme_temp_C = bme_temp_C;	// update previous value
+				previous_bme_temp_C = bme_T;	// update previous value
 			}
 	    }
     }
@@ -1768,24 +1781,24 @@ void save_data(void) {
     char extra_str[MAX_OUT_STR_SIZE];
 //	NRF_LOG_DEBUG("sharpPM_value*adc_to_V/MBED_VREF: " NRF_LOG_FLOAT_MARKER, NRF_LOG_FLOAT(sharpPM_value*adc_to_V/MBED_VREF));
 	NRF_LOG_FLUSH();
-//    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-//    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*adc_to_V/MBED_VREF*1000),dht_temp_C,dht_humidity,(int) (specCO_value*adc_to_V/MBED_VREF*1000),(int) (figCO_value*adc_to_V/MBED_VREF*1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_T, bme_H, bme_P, rtc_temp, temp_nrf, (int) (battery_value*adc_to_V*1000), fuel_v_cell, fuel_percent, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//    int out_str_size = sprintf(out_str, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%lu,%lu,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_T, bme_H, bme_P, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 
 	// Save different strings depending on the device
 	#if PRODUCT_TYPE == SUM
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == HAP
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, fuel_v_cell, fuel_percent);
-		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C[0], bme_humidity[0], fuel_v_cell, fuel_percent);
+		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure[0], rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == TEMP_MONITOR
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, dht_temp_C[0], dht_temp_C[1], dht_humidity[0], dht_humidity[1], ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent);
-		int extra_str_size = sprintf(extra_str, "%ld,%ld,%d,%lu,%lu,%lu\r\n", time_now, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, dht_temp_C[0], dht_temp_C[1], dht_temp_C[2], dht_humidity[0], dht_humidity[1], dht_humidity[2], bme_temp_C[0], bme_temp_C[1], bme_humidity[0], bme_humidity[1], ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent);
+		int extra_str_size = sprintf(extra_str, "%ld,%lu,%lu,%ld,%d,%lu,%lu,%lu\r\n", time_now, bme_pressure[0], bme_pressure[1], temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#else
-//		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-//		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
-		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C, bme_humidity, bme_pressure, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_T, bme_H, bme_P, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+//		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_T, bme_H, bme_P, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C[0], bme_humidity[0], bme_pressure[0], rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
+		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C[0], bme_humidity[0], bme_pressure[0], rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 	#endif
 
 	NRF_LOG_DEBUG("out_str: %s", out_str);
@@ -2176,8 +2189,8 @@ static void services_init(void)
     custom_char_add(&product_service, BLE_UUID_PM10_CHARACTERISTIC, 		&product_service.pm10_handles, 		(uint8_t *) &plantower_10_value, 	sizeof(plantower_10_value),		1,0,	1);
     custom_char_add(&product_service, BLE_UUID_CO_CHARACTERISTIC, 			&product_service.co_handles, 		(uint8_t *) &specCO_value, 			sizeof(specCO_value),			1,0,	1);
     custom_char_add(&product_service, BLE_UUID_CO2_CHARACTERISTIC, 			&product_service.co2_handles, 		(uint8_t *) &figCO2_value, 			sizeof(figCO2_value),			1,0,	1);
-    custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_humidity, 			sizeof(bme_humidity),			1,0,	1);
-    custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_temp_C, 			sizeof(bme_temp_C),				1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_H, 			sizeof(bme_H),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_T, 			sizeof(bme_T),				1,0,	1);
     custom_char_add(&product_service, BLE_UUID_PLANTOWER_WAIT_CHARACTERISTIC, 	&product_service.plantower_wait_handles, 	(uint8_t *) &plantower_startup_wait_ms, sizeof(plantower_startup_wait_ms),			1,1,	0);
     custom_char_add(&product_service, BLE_UUID_SPEC_CO_WAIT_CHARACTERISTIC, 	&product_service.specCO_wait_handles, 		(uint8_t *) &specCO_startup_wait_ms, 	sizeof(specCO_startup_wait_ms),				1,1,	0);
     custom_char_add(&product_service, BLE_UUID_FIGARO_CO2_WAIT_CHARACTERISTIC, 	&product_service.figaroCO2_wait_handles, 	(uint8_t *) &figaroCO2_startup_wait_ms, sizeof(figaroCO2_startup_wait_ms),			1,1,	0);
@@ -2190,8 +2203,8 @@ static void services_init(void)
     custom_char_add(&product_service, BLE_UUID_PM10_CHARACTERISTIC, 		&product_service.pm10_handles, 		(uint8_t *) &plantower_10_value, 	sizeof(plantower_10_value),		1,0,	1);
     custom_char_add(&product_service, BLE_UUID_CO_CHARACTERISTIC, 			&product_service.co_handles, 		(uint8_t *) &specCO_value, 			sizeof(specCO_value),			1,0,	1);
     custom_char_add(&product_service, BLE_UUID_CO2_CHARACTERISTIC, 			&product_service.co2_handles, 		(uint8_t *) &figCO2_value, 			sizeof(figCO2_value),			1,0,	1);
-    custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_humidity, 			sizeof(bme_humidity),			1,0,	1);
-    custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_temp_C, 			sizeof(bme_temp_C),				1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_RH_CHARACTERISTIC, 			&product_service.rh_handles, 		(uint8_t *) &bme_H, 			sizeof(bme_H),			1,0,	1);
+    custom_char_add(&product_service, BLE_UUID_TEMP_BME_CHARACTERISTIC, 	&product_service.temp_bme_handles, 	(uint8_t *) &bme_T, 			sizeof(bme_T),				1,0,	1);
 
     custom_char_add(&product_service, BLE_UUID_TEMP_RTC_CHARACTERISTIC, 	&product_service.temp_rtc_handles, 	(uint8_t *) &rtc_temp, 				sizeof(rtc_temp),				1,0,	1);
     custom_char_add(&product_service, BLE_UUID_AMBIENT_CH0_CHARACTERISTIC, 	&product_service.ambient_CH0_handles, (uint8_t *) &ambient_CH0, 		sizeof(ambient_CH0),			1,0,	1);
@@ -3564,7 +3577,7 @@ static ret_code_t read_figCO2()
 
 
 // Compensate the raw BME280 values using calibration values
-static ret_code_t bme_read_calib_data() {
+static ret_code_t bme_read_calib_data(uint8_t bme_addr) {
 
 	uint8_t cmd[18];
 	uint8_t reg0;
@@ -3634,11 +3647,11 @@ static ret_code_t bme_read_calib_data() {
 
 
 // Read BME280 TRH with TWI (I2C)
-static ret_code_t bme_init() {
+static ret_code_t bme_init(uint8_t bme_addr) {
 
 	// Read and store calibration data once for all future reads
 	if (!has_read_calib_data) {
-		err_code = bme_read_calib_data();
+		err_code = bme_read_calib_data(bme_addr);
 	    if (err_code) {	// handle error outside
 	    	return err_code;
 	    }
@@ -3672,7 +3685,7 @@ static ret_code_t bme_init() {
 
 
 // Read BME280 TRH with TWI (I2C)
-static ret_code_t read_BME() {
+static ret_code_t read_BME(uint8_t bme_addr) {
 
 	uint8_t bmebuff[BME_BUFF_SIZE];
 
@@ -3705,7 +3718,7 @@ static ret_code_t read_BME() {
 	        (((((temp_raw >> 3) - (dig_T1 << 1))) * dig_T2) >> 11) +
 	        ((((((temp_raw >> 4) - dig_T1) * ((temp_raw >> 4) - dig_T1)) >> 12) * dig_T3) >> 14);
 	t_fine = temp;
-	bme_temp_C = (temp * 5 + 128) >> 8;
+	bme_T = (temp * 5 + 128) >> 8;
 
 	// Compensate Pressure
 	int32_t var1, var2;
@@ -3728,7 +3741,7 @@ static ret_code_t read_BME() {
 	}
 	var1 = ((int32_t)dig_P9 * ((int32_t)(((press >> 3) * (press >> 3)) >> 13))) >> 12;
 	var2 = (((int32_t)(press >> 2)) * (int32_t)dig_P8) >> 13;
-	bme_pressure = (press + ((var1 + var2 + dig_P7) >> 4));
+	bme_P = (press + ((var1 + var2 + dig_P7) >> 4));
 
 	// Compensate Humidity
 	int32_t v_x1;
@@ -3742,7 +3755,7 @@ static ret_code_t read_BME() {
 	v_x1 = (v_x1 < 0 ? 0 : v_x1);
 	v_x1 = (v_x1 > 419430400 ? 419430400 : v_x1);
 
-	bme_humidity = (v_x1 >> 12)*1000/1024;
+	bme_H = (v_x1 >> 12)*1000/1024;
 
     return err_code;
 }
@@ -4746,7 +4759,7 @@ void get_data() {
 			NRF_LOG_WARNING("** WARNING: SETTING TIME MANUALLY **");
 //			set_rtc(00, 44, 21, 	3, 6, 3, 18);	// 2018-03-06 Tues, 9:44:00 pm, NOTE: GMT!!!
 //			set_rtc(00, 9, 13, 5, 10, 5, 18);	// about 11 seconds of delay
-			set_rtc(00, 5, 16 +4, 	7, 4, 8, 18);	// about 11 seconds of delay
+			set_rtc(00, 20, 19 +4, 	7, 4, 8, 18);	// about 11 seconds of delay
 			time_was_set = 1;
 			// NOTE: turn OFF SETTING_TIME_MANUALLY after
 		}
@@ -4891,56 +4904,6 @@ void get_data() {
 
 
 
-	// DHT sensor
-	if (using_component(DHT, components_used)) {
-		NRF_LOG_INFO("");
-		NRF_LOG_INFO("Testing DHT...");
-		NRF_LOG_INFO("--------------");
-//		dht_init(DHT_PIN);
-		dht_init();
-
-		// Wait for sensor to settle from when ADP turned on
-		NRF_LOG_INFO("Waiting for dht_startup_wait_done: %d", DHT_STARTUP_WAIT_TIME);
-		while (!dht_startup_wait_done) {}
-		NRF_LOG_DEBUG("--DHT WAIT DONE");
-
-
-		// Read each DHT pin that we have connected
-		for (uint8_t i = 0; i < dht_num; i++) {
-			NRF_LOG_INFO("-Reading DHT pin: %d", dht_pins[i]);
-
-			err_code = DHTLIB_ERROR_TIMEOUT;
-			for (int i=0; (err_code == DHTLIB_ERROR_TIMEOUT) && (i < DHT_RETRY_NUM); i++) {
-	//			err_code = dht_read();
-//				err_code = dht_read(DHT_PIN);
-				err_code = dht_read(dht_pins[i]);
-				if (err_code == DHTLIB_ERROR_TIMEOUT) {
-					NRF_LOG_INFO("* RETRY: DHT TIMEOUT ERROR, err_code=%d *", err_code);
-					avoided_error_cnt++;
-				}
-				nrf_delay_ms(500);
-			}
-			if (err_code) {
-				NRF_LOG_ERROR("** ERROR: DHT read, err_code=%d **", err_code);
-				dht_temp_C[i] = 0;
-				dht_humidity[i] = 0;
-				err_cnt++;
-				dht_error_cnt_total++;
-			} else {
-	//			NRF_LOG_DEBUG("SUCCESS: DHT READ");
-				dht_temp_C[i] = dht_getCelsius();
-				dht_humidity[i] = dht_getHumidity();
-			}
-			NRF_LOG_INFO("dht_temp_C[%d]: %d", i, dht_temp_C[i]);
-			NRF_LOG_INFO("dht_temp_F[%d]: %d", i, dht_getFahrenheit());
-			NRF_LOG_INFO("dht_humidity[%d]: %d", i, dht_humidity[i]);
-		}
-
-
-
-
-		dht_uninit();
-	}
 
 
 	// Testing GPIO
@@ -5014,30 +4977,94 @@ void get_data() {
 		NRF_LOG_INFO("Testing BME280 TRH with I2C/TWI...");
 		NRF_LOG_INFO("----------------------------------");
 
-		err_code = 1;
-		for (int i=0; (err_code) && (i < TWI_RETRY_NUM); i++) {
-			err_code = bme_init();
-			nrf_delay_ms(BME_MEAS_WAIT);	// Wait for the measurements to end. TODO: maybe disable TWI before and after wait
-			err_code = read_BME();
-			if (err_code) {
-				NRF_LOG_INFO("* RETRY: BME ERROR, err_code=%d *", err_code);
-				avoided_error_cnt++;
+		// Read each DHT pin that we have connected
+		for (uint8_t i = 0; i < BME_NUM; i++) {
+			uint8_t bme_addr = bme_addresses[i];
+			NRF_LOG_INFO("-Reading bme_addr: 0x%x", bme_addr);
+
+			for (int ii=0; ii < TWI_RETRY_NUM; ii++) {
+				err_code = bme_init(bme_addr);
+				nrf_delay_ms(BME_MEAS_WAIT);	// Wait for the measurements to end. TODO: maybe disable TWI before and after wait
+				err_code = read_BME(bme_addr);
+				if (err_code == NRF_SUCCESS) {
+					break;
+				} else if (err_code) {
+					NRF_LOG_INFO("* RETRY: BME ERROR, err_code=%d *", err_code);
+					avoided_error_cnt++;
+				}
 				nrf_delay_ms(TWI_RETRY_WAIT);
 			}
+
+			if (err_code) {
+				NRF_LOG_ERROR("** ERROR: BME280 TRH read, err_code=%d **", err_code);
+				bme_temp_C[i] = 0;
+				bme_humidity[i] = 0;
+				bme_pressure[i] = 0;
+				err_cnt++;
+				bme_error_cnt_total++;
+			} else {
+				bme_temp_C[i] = bme_T;
+				bme_humidity[i] = bme_H;
+				bme_pressure[i] = bme_P;
+			}
+			NRF_LOG_INFO("bme_temp_C[%d]: %d", i, bme_temp_C[i]);
+			NRF_LOG_INFO("bme_humidity[%d]: %d", i, bme_humidity[i]);
+			NRF_LOG_INFO("bme_pressure[%d]: %d", i, bme_pressure[i]);
+		}
+	}
+
+
+	// DHT sensor
+	if (using_component(DHT, components_used)) {
+		NRF_LOG_INFO("");
+		NRF_LOG_INFO("Testing DHT...");
+		NRF_LOG_INFO("--------------");
+//		dht_init(DHT_PIN);
+		dht_init();
+
+		// Wait for sensor to settle from when ADP turned on
+		NRF_LOG_INFO("Waiting for dht_startup_wait_done: %d", DHT_STARTUP_WAIT_TIME);
+		while (!dht_startup_wait_done) {}
+		NRF_LOG_DEBUG("--DHT WAIT DONE");
+
+
+		// Read each DHT pin that we have connected
+		for (uint8_t i = 0; i < DHT_NUM; i++) {
+			NRF_LOG_INFO("-Reading DHT pin: %d", dht_pins[i]);
+
+			for (int ii=0; ii < DHT_RETRY_NUM; ii++) {
+	//			err_code = dht_read();
+//				err_code = dht_read(DHT_PIN);
+				err_code = dht_read(dht_pins[i]);
+				if (err_code == DHTLIB_OK) {
+					break;
+				} else if (err_code == DHTLIB_ERROR_TIMEOUT) {
+					NRF_LOG_INFO("* RETRY: DHT TIMEOUT ERROR, err_code=%d *", err_code);
+					avoided_error_cnt++;
+				} else {
+					NRF_LOG_INFO("* RETRY: DHT UNKNOWN ERROR, err_code=%d *", err_code);
+				}
+				nrf_delay_ms(500);
+			}
+			if (err_code) {
+				NRF_LOG_ERROR("** ERROR: DHT read, err_code=%d **", err_code);
+				dht_temp_C[i] = 0;
+				dht_humidity[i] = 0;
+				err_cnt++;
+				dht_error_cnt_total++;
+			} else {
+	//			NRF_LOG_DEBUG("SUCCESS: DHT READ");
+				dht_temp_C[i] = dht_getCelsius();
+				dht_humidity[i] = dht_getHumidity();
+			}
+			NRF_LOG_INFO("dht_temp_C[%d]: %d", i, dht_temp_C[i]);
+//			NRF_LOG_INFO("dht_temp_F[%d]: %d", i, dht_getFahrenheit());
+			NRF_LOG_INFO("dht_humidity[%d]: %d", i, dht_humidity[i]);
 		}
 
-		if (err_code) {
-			NRF_LOG_ERROR("** ERROR: BME280 TRH read, err_code=%d **", err_code);
-			bme_temp_C = 0;
-			bme_humidity = 0;
-			bme_pressure = 0;
-			err_cnt++;
-			bme_error_cnt_total++;
-		}
-		NRF_LOG_INFO("bme_temp_C: %d", bme_temp_C);
-		NRF_LOG_INFO("bme_humidity: %d", bme_humidity);
-		NRF_LOG_INFO("bme_pressure: %d", bme_pressure);
+		dht_uninit();
 	}
+
 
 
 	// Trying to read sample from ADC
