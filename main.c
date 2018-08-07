@@ -131,7 +131,7 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	SUM	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
