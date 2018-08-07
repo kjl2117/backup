@@ -131,24 +131,24 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	TEMP_MONITOR	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
-#define RESET_VALUES_FILE			1	// If we want to delete the initial values, to use FW values instead
+#define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
-static int32_t log_interval = 30*1000;	//60*1000;	// units: ms
+static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
+static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static uint32_t log_interval = 10*1000;	// units: ms
-//#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
-#define SPEC_CO_STARTUP_WAIT_TIME		0.1*1000	//ms,	Response time < 30s (15s typical)
+#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
+//#define SPEC_CO_STARTUP_WAIT_TIME		0.1*1000	//ms,	Response time < 30s (15s typical)
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
-//#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
-#define FIGARO_CO2_STARTUP_WAIT_TIME	0.1*1000	// 2*1000 is too small, only reading value==360
+#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+//#define FIGARO_CO2_STARTUP_WAIT_TIME	0.1*1000	// 2*1000 is too small, only reading value==360
 #define FUEL_GAUGE_RCOMP	0x97	// Config value to adjust for Custom batteries
 
 #define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
@@ -5913,6 +5913,8 @@ int main(void) {
 		NRF_LOG_INFO("PRODUCT_TYPE: SUM");
 	} else if (PRODUCT_TYPE == HAP) {
 		NRF_LOG_INFO("PRODUCT_TYPE: HAP");
+	} else if (PRODUCT_TYPE == TEMP_MONITOR) {
+		NRF_LOG_INFO("PRODUCT_TYPE: TEMP_MONITOR");
 	} else if (PRODUCT_TYPE == BATTERY_TEST) {
 		NRF_LOG_INFO("PRODUCT_TYPE: BATTERY_TEST");
 	} else if (PRODUCT_TYPE == WAIT_TIME_TEST) {
