@@ -237,8 +237,8 @@ typedef enum {
 	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
-		ADP,		// DIG
-		ADP_HIGH,	// DIG, for switching only High Power sensors
+//		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
 		SDC,		// SD card, SPIO
 		BATTERY,	// AIN(no pin),	3279
 		FUEL_GAUGE,	// I2C
