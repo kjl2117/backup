@@ -137,9 +137,9 @@ static void stop_measurements();
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
-static int32_t log_interval = 5*1000;	//60*1000;	// units: ms
-//static uint32_t log_interval = 10*1000;	// units: ms
+static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
+//static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
+static int32_t log_interval = 5*1000;	// units: ms
 //#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 //#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
@@ -4807,12 +4807,12 @@ void get_data() {
 
 		// If nRF clock and RTC are unsynced, correct it
 		if (!adjusting_timer_start && !is_live_streaming) {
-			uint32_t timer_offset_s = time_now % (log_interval/1000);
+			int32_t timer_offset_s = time_now % (log_interval/1000);
 			if (timer_offset_s != 0) {
 				int32_t ms_to_next_meas = log_interval - timer_offset_s*1000 - INITIAL_SETTLING_WAIT;
 
 				// Correct if the wait is too short (maybe RTC was slower)
-				if (ms_to_next_meas < log_interval/2) {
+				if (ms_to_next_meas <= log_interval/2) {
 					ms_to_next_meas += log_interval;
 					skipping_next_meas_loop = true;
 					NRF_LOG_INFO("skipping_next_meas_loop: %d", skipping_next_meas_loop);
@@ -4849,13 +4849,14 @@ void get_data() {
 		if (adjusting_timer_start) {
 			int32_t time_to_wait_s = log_interval/1000 - (time_now % (log_interval/1000)) - INITIAL_SETTLING_WAIT/1000;
 //			uint32_t max_sensor_wait_ms = (PLANTOWER_STARTUP_WAIT_TIME > SPEC_CO_STARTUP_WAIT_TIME) ? PLANTOWER_STARTUP_WAIT_TIME : SPEC_CO_STARTUP_WAIT_TIME;
-			if (time_to_wait_s < 2*max_sensor_wait_ms/1000) {	// Make sure we wait more than the sensor wait time; don't want to adjust time while still measuring
+			if (time_to_wait_s <= 2*max_sensor_wait_ms/1000) {	// Make sure we wait more than the sensor wait time; don't want to adjust time while still measuring
 				time_to_wait_s += log_interval/1000;
 				skipping_next_meas_loop = true;
 				NRF_LOG_INFO("skipping_next_meas_loop: %d", skipping_next_meas_loop);
 			}
 			NRF_LOG_INFO("time_to_wait_s: %d", time_to_wait_s);
-		    start_adjustment_wait_done = false;
+
+			start_adjustment_wait_done = false;
 			err_code = app_timer_start(start_adjustment_timer, APP_TIMER_TICKS(time_to_wait_s*1000), NULL);
 			if (err_code) {
 				NRF_LOG_WARNING("** WARNING: %d, app_timer_start(time_to_wait_s)", err_code);
