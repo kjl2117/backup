@@ -137,18 +137,18 @@ static void stop_measurements();
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
-//static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
-static int32_t log_interval = 5*1000;	// units: ms
-//#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-#define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
-//#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
-#define SPEC_CO_STARTUP_WAIT_TIME		0.1*1000	//ms,	Response time < 30s (15s typical)
+static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
+static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
+//static int32_t log_interval = 5*1000;	// units: ms
+#define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+//#define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
+#define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
+//#define SPEC_CO_STARTUP_WAIT_TIME		0.1*1000	//ms,	Response time < 30s (15s typical)
 #define FUEL_PERCENT_THRESHOLD			20	//20	// Start extrapolating after this threshold (%)
 #define MIN_BATTERY_LEVEL				3400	//units: percent*1000, NOTE: set to 0 for BATTERY_TEST
 //static uint16_t min_battery_level = 10*1000;	// units: percent*1000
-//#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
-#define FIGARO_CO2_STARTUP_WAIT_TIME	0.1*1000	// 2*1000 is too small, only reading value==360
+#define FIGARO_CO2_STARTUP_WAIT_TIME	5*1000	// 2*1000 is too small, only reading value==360
+//#define FIGARO_CO2_STARTUP_WAIT_TIME	0.1*1000	// 2*1000 is too small, only reading value==360
 #define FUEL_GAUGE_RCOMP	0x97	// Config value to adjust for Custom batteries
 
 #define NUM_SAMPLES_PER_ON_CYCLE	1	//1	//150	// 1,	20
@@ -237,8 +237,8 @@ typedef enum {
 	const uint8_t bme_addresses[] = {	0x76	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == HAP
 	static component_type components_used[] = {
-//		ADP,		// DIG
-//		ADP_HIGH,	// DIG, for switching only High Power sensors
+		ADP,		// DIG
+		ADP_HIGH,	// DIG, for switching only High Power sensors
 		SDC,		// SD card, SPIO
 		BATTERY,	// AIN(no pin),	3279
 		FUEL_GAUGE,	// I2C
