@@ -131,15 +131,15 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	TEMP_MONITOR	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
-#define DELETE_ALL_FILES			0	// If we want to clear the SD card
+#define DELETE_ALL_FILES			1	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
 static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
 static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
-//static int32_t log_interval = 5*1000;	// units: ms
+//static int32_t log_interval = 30*1000;	// units: ms
 #define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 //#define PLANTOWER_STARTUP_WAIT_TIME		0.1*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
 #define SPEC_CO_STARTUP_WAIT_TIME		25*1000	//ms,	Response time < 30s (15s typical)
@@ -177,7 +177,7 @@ static char ble_file_name[] = LOG_FILE_NAME;	//BLE_TEST_FILE_NAME;
 #define UVA_VEML_MEAS_DELAY		500	// Time to wait before measuring to allow for integration: <500 doesn't really measure anything
 #define DHT_PIN		14	//16		///< 	P0.16 DHT pin
 #define DHT_PIN_2	11	// Additional DHT pins
-#define DHT_PIN_3	12	// Additional DHT pins
+#define DHT_PIN_3	13	// Additional DHT pins
 
 
 // The different sensors (used for choosing which sensor code to run)
@@ -262,16 +262,17 @@ typedef enum {
 #elif PRODUCT_TYPE == TEMP_MONITOR
 	static component_type components_used[] = {
 		ADP,		// DIG
+//		ADP_HIGH,	// DIG, for switching only High Power sensors
 		SDC,		// SD card, SPIO
 		BATTERY,	// AIN(no pin),	3279
-		FUEL_GAUGE,	// I2C
+//		FUEL_GAUGE,	// I2C
 		TEMP_NRF,	// REGISTER
 		RTC,		// I2C
 			DHT,	// 1-wire
 			BME,	// I2C
 	//////				UV_SI1145,		// I2C
-		AMBIENT_LTR,	// I2C
-		UVA_VEML		// I2C
+//		AMBIENT_LTR,	// I2C
+//		UVA_VEML		// I2C
 	};
 	static int components_used_size = sizeof(components_used) / sizeof(components_used[0]);
 	static battery_type battery_type_used = BAT_LIPO_2000mAh;
@@ -409,8 +410,8 @@ static ret_code_t err_code;
 	#define FILE_HEADER			"Time,specCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_temp_C,bme_humidity,fuel_v_cell,fuel_percent\r\n"
 	#define FILE_HEADER_EXTRA	"Time,bme_pressure,rtc_temp,temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
 #elif PRODUCT_TYPE == TEMP_MONITOR
-	#define FILE_HEADER			"Time,rtc_temp,dht_temp_C[0],dht_temp_C[1],dht_temp_C[2],dht_humidity[0],dht_humidity[1],dht_humidity[2],bme_temp_C[0],bme_temp_C[1],bme_humidity[0],bme_humidity[1],ambient_CH0,ambient_CH1,uva_value,fuel_v_cell,fuel_percent\r\n"
-	#define FILE_HEADER_EXTRA	"Time,bme_pressure[0],bme_pressure[1],temp_nrf,battery_value,fuel_percent,fuel_percent_raw,err_cnt\r\n"
+	#define FILE_HEADER			"Time,dht_temp_C[0],dht_temp_C[1],dht_temp_C[2],dht_humidity[0],dht_humidity[1],dht_humidity[2],bme_temp_C[0],bme_temp_C[1],bme_humidity[0],bme_humidity[1],bme_pressure[0],bme_pressure[1]\r\n"
+	#define FILE_HEADER_EXTRA	"Time,rtc_temp,temp_nrf,battery_value,err_cnt\r\n"
 #else
 	#define FILE_HEADER			"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_T,bme_H,bme_P,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
 	#define FILE_HEADER_EXTRA	"Time,PM2_5,PM10,sharpPM,dhtTemp,dhtHum,specCO,figaroCO,figaroCO2,plantower_2_5_value,plantower_10_value,bme_T,bme_H,bme_P,rtc_temp,temp_nrf,ambient_CH0,ambient_CH1,uva_value,battery_value,fuel_v_cell,fuel_percent,fuel_percent_raw,runtime_estimate,fuel_t0,fuel_p0,t0,err_cnt,dht_error_cnt_total,hpm_error_cnt_total\r\n"
@@ -1792,8 +1793,8 @@ void save_data(void) {
 		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%ld,%ld,%d,%lu\r\n",time_now, (int) (specCO_value*1000*1000/V_to_adc_1000), figCO2_value, plantower_2_5_value, plantower_10_value, bme_temp_C[0], bme_humidity[0], fuel_v_cell, fuel_percent);
 		int extra_str_size = sprintf(extra_str, "%ld,%lu,%d,%ld,%d,%lu,%lu,%lu\r\n",time_now, bme_pressure[0], rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
 	#elif PRODUCT_TYPE == TEMP_MONITOR
-		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%d,%d,%d,%d,%lu\r\n",time_now, rtc_temp, dht_temp_C[0], dht_temp_C[1], dht_temp_C[2], dht_humidity[0], dht_humidity[1], dht_humidity[2], bme_temp_C[0], bme_temp_C[1], bme_humidity[0], bme_humidity[1], ambient_CH0, ambient_CH1, uva_value, fuel_v_cell, fuel_percent);
-		int extra_str_size = sprintf(extra_str, "%ld,%lu,%lu,%ld,%d,%lu,%lu,%lu\r\n", time_now, bme_pressure[0], bme_pressure[1], temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_percent, fuel_percent_raw, err_cnt);
+		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld,%ld\r\n",time_now, dht_temp_C[0], dht_temp_C[1], dht_temp_C[2], dht_humidity[0], dht_humidity[1], dht_humidity[2], bme_temp_C[0], bme_temp_C[1], bme_humidity[0], bme_humidity[1], bme_pressure[0], bme_pressure[1]);
+		int extra_str_size = sprintf(extra_str, "%ld,%d,%ld,%d,%lu\r\n", time_now, rtc_temp, temp_nrf, (int) (battery_value*1000*1000/V_to_adc_1000), err_cnt);
 	#else
 //		int out_str_size = sprintf(out_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_T, bme_H, bme_P, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
 //		int extra_str_size = sprintf(extra_str, "%ld,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%ld,%ld,%lu,%d,%ld,%d,%d,%d,%d,%d,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu\r\n",time_now,hpm_2_5_value,hpm_10_value,(int) (sharpPM_value*1000*1000/V_to_adc_1000),dht_temp_C,dht_humidity,(int) (specCO_value*1000*1000/V_to_adc_1000),(int) (figCO_value*1000*1000/V_to_adc_1000),figCO2_value, plantower_2_5_value, plantower_10_value, bme_T, bme_H, bme_P, rtc_temp, temp_nrf, ambient_CH0, ambient_CH1, uva_value, (int) (battery_value*1000*1000/V_to_adc_1000), fuel_v_cell, fuel_percent, fuel_percent_raw, runtime_estimate, fuel_t0, fuel_p0, t0, err_cnt, dht_error_cnt_total, hpm_error_cnt_total);
@@ -5040,10 +5041,12 @@ void get_data() {
 				if (err_code == DHTLIB_OK) {
 					break;
 				} else if (err_code == DHTLIB_ERROR_TIMEOUT) {
-					NRF_LOG_INFO("* RETRY: DHT TIMEOUT ERROR, err_code=%d *", err_code);
+					NRF_LOG_WARNING("* RETRY: DHTLIB_ERROR_TIMEOUT, err_code=%d *", err_code);
 					avoided_error_cnt++;
+				} else if (err_code == DHTLIB_ERROR_CHECKSUM) {
+					NRF_LOG_WARNING("* DHTLIB_ERROR_CHECKSUM, err_code=%d *", err_code);
 				} else {
-					NRF_LOG_INFO("* RETRY: DHT UNKNOWN ERROR, err_code=%d *", err_code);
+					NRF_LOG_WARNING("* RETRY: DHT UNKNOWN ERROR, err_code=%d *", err_code);
 				}
 				nrf_delay_ms(500);
 			}
@@ -5659,18 +5662,22 @@ int test_main() {
 
 // If the battery level is too low, stop measurements and sleep forever
 static void check_min_battery_level() {
-//	if (fuel_percent < min_battery_level) {
-	if (fuel_v_cell < min_battery_level) {
-		NRF_LOG_WARNING("fuel_v_cell < min_battery_level: LOW POWER MODE");
-		stop_measurements();
 
-		// Ensure that all ADP's are off
-		nrf_gpio_cfg_output(ADP1_PIN);
-		nrf_gpio_cfg_output(ADP2_PIN);
-		NRF_LOG_DEBUG("ALL ADP: LOW.");
-		nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH, Turn OFF ADP
-		nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH, Turn OFF ADP
+	// Only do this if we have the fuel gauge
+	if (using_component(FUEL_GAUGE, components_used)) {
+	//	if (fuel_percent < min_battery_level) {
+		if (fuel_v_cell < min_battery_level) {
+			NRF_LOG_WARNING("fuel_v_cell < min_battery_level: LOW POWER MODE");
+			stop_measurements();
 
+			// Ensure that all ADP's are off
+			nrf_gpio_cfg_output(ADP1_PIN);
+			nrf_gpio_cfg_output(ADP2_PIN);
+			NRF_LOG_DEBUG("ALL ADP: LOW.");
+			nrf_gpio_pin_clear(ADP1_PIN);	// Enable HIGH, Turn OFF ADP
+			nrf_gpio_pin_clear(ADP2_PIN);	// Enable HIGH, Turn OFF ADP
+
+		}
 	}
 }
 
@@ -6156,6 +6163,13 @@ int main(void) {
 
         // Feed WDT before sleeping again, otherwise it will still reset in ~3.5 days
         nrf_drv_wdt_feed();
+
+
+
+
+
+        // FOR TESTING: REMOVE LATER
+//        sd_power_off();
     }
 
 }

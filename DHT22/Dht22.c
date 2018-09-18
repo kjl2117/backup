@@ -96,6 +96,11 @@ int dht_read(uint8_t dht_pin) {
     uint32_t bit_time_elapsed = 0;
 
 
+    // Pull pin up and wait so it thinks it's been on (needs to start high)
+    nrf_gpio_cfg_output(dht_pin);
+	nrf_gpio_pin_set(dht_pin);
+	nrf_delay_ms(10);
+
 
     // Notify it we are ready to read
     nrf_gpio_cfg_output(dht_pin);
@@ -167,6 +172,11 @@ int dht_read(uint8_t dht_pin) {
 
 	nrf_drv_timer_disable(&m_timer);	// done with the Timer
 //	nrf_drv_timer_uninit(&m_timer);	// TODO: CHECK THIS: do not uninit, may need it on
+
+	// Turn off pin to save power
+    nrf_gpio_cfg_output(dht_pin);
+	nrf_gpio_pin_clear(dht_pin);
+
 
 
     uint8_t dht22_check_sum;
