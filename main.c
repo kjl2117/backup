@@ -131,13 +131,13 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	TEMP_MONITOR	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
-#define DELETE_ALL_FILES			1	// If we want to clear the SD card
+#define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
 #define SD_FAIL_SHUTDOWN			1	// If true, will enter infinite loop when SD fails (and wdt will reset)
 #define READING_VALUES_FILE			1	// If we want to read in saved values from the config file
-static bool on_logging = false;	// true;	false;	Start with logging on or off (Also App can control this)
+static bool on_logging = true;	// true;	false;	Start with logging on or off (Also App can control this)
 static int32_t log_interval = 300*1000;	//60*1000;	// units: ms
 //static int32_t log_interval = 30*1000;	// units: ms
 #define PLANTOWER_STARTUP_WAIT_TIME		12*1000	//ms	~2.5s is min,	Total response time < 10s (30s after wakeup)
@@ -2459,7 +2459,8 @@ static void on_ble_write(ble_custom_service_t * p_our_service, ble_evt_t const *
 
 		NRF_LOG_INFO("time_to_be_set: %d", time_to_be_set);
 		setting_new_time = true;	// set flag, handle it later whe reading RTC
-
+		meas_loop_wait_done = true;	// makes sure that it reads/writes RTC immediately
+		adjusting_timer_start = true;	// need to reset this so that it measures at predictable intervals
 
 //		// FOR TESTING if this will work if called NOT from main context
 //		NRF_LOG_INFO("setting_new_time: %d", time_to_be_set);
