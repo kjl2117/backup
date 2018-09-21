@@ -131,7 +131,7 @@ static void stop_measurements();
 //--------------------//
 
 /** Overall **/
-#define PRODUCT_TYPE	HAP	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
+#define PRODUCT_TYPE	TEMP_MONITOR	//	OPTIONS: SUM, HAP, TEMP_MONITOR, BATTERY_TEST, WAIT_TIME_TEST, CUSTOM,
 #define SETTING_TIME_MANUALLY		0		// set to 1, then set to 0 and flash; o/w will rewrite same time when reset
 #define DELETE_ALL_FILES			0	// If we want to clear the SD card
 #define RESET_VALUES_FILE			0	// If we want to delete the initial values, to use FW values instead
@@ -282,7 +282,7 @@ typedef enum {
 	static char product_FW_version[] = 		"TEMP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = 2*DHT_STARTUP_WAIT_TIME;
-	static uint8_t dht_pins[] = {	DHT_PIN,	DHT_PIN_2,	DHT_PIN_3	};
+	static uint8_t dht_pins[] = {	DHT_PIN_2,	DHT_PIN_3,	DHT_PIN	};
 	const uint8_t bme_addresses[] = {	0x76,	0x77	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
