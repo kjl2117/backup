@@ -282,7 +282,7 @@ typedef enum {
 	static char product_FW_version[] = 		"TEMP_v1.00";
 	#define LIVE_STREAM_LOG_INTERVAL	5*1000	//ms
 	static uint32_t max_sensor_wait_ms = 2*DHT_STARTUP_WAIT_TIME;
-	static uint8_t dht_pins[] = {	DHT_PIN_2,	DHT_PIN_3,	DHT_PIN	};
+	static uint8_t dht_pins[] = {	DHT_PIN,	DHT_PIN_2,	DHT_PIN_3	};
 	const uint8_t bme_addresses[] = {	0x76,	0x77	};	//0x77; // 8bit I2C address, 0x76 or 0x77
 #elif PRODUCT_TYPE == BATTERY_TEST
 	static component_type components_used[] = {
